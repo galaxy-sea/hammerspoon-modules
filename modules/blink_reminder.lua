@@ -1,17 +1,19 @@
--- ~/.hammerspoon/modules/blink_reminder.lua
--- 每20分钟提醒一次；可延后1/5/10分钟；关闭须经过两次确认。
--- 关闭按钮和延后 1/5/10 分钟按钮在显示器随机位置出现、每次随机换色。
--- Hammerspoon 全局检测鼠标位置：无需点击，进入按钮区域立即开始连续悬停10秒计时。
--- 不自动关闭、不淡出、不创建菜单栏倒计时。
--- 使用：require("modules.blink_reminder").start({ hotkey = { mods = {...}, key = "..." } })
--- hotkey.bind = false 或不传快捷键时仅启动定时提醒，也可调用 .show() 手动显示。
+--[[
+require("modules.blink_reminder").start({
+    intervalMinutes = 20,       -- 每轮提醒间隔（分钟），完成关闭流程后重新计时
+    snoozeMinutes = { 1, 5, 10 }, -- 延后选项（分钟）；{} 不显示延后按钮
+    hoverSeconds = 10,          -- 每次必须连续悬停的秒数，移出按钮重新计时
+    hoverCount = 3,             -- 关闭共需悬停并点击的次数，含「已休息」这一次
+    hotkey = { mods = { "ctrl", "alt", "cmd" }, key = "B", bind = false },
+})
+-- hotkey.bind = false 或省略 hotkey 时只启动定时提醒；.show() 可手动显示。
+-- 所有悬浮按钮随机位置和颜色；延后按钮可直接点击，无需悬停。
+]]
 
 local M = {}
 
-local NORMAL_INTERVAL = 20 * 60
 local PANEL_WIDTH, PANEL_HEIGHT = 500, 338
 local BUTTON_WIDTH, BUTTON_HEIGHT = 112, 42  -- 更小的悬浮按钮；主体约 108 × 38 px
-local HOVER_SECONDS = 10                 -- 必须连续悬停的秒数
 local EDGE_MARGIN = 14             -- 不遮住菜单栏、Dock，也不贴着边缘
 local PANEL_CLEARANCE = 22         -- 随机按钮避开中央提醒窗口
 local RANDOM_TRIES = 200
@@ -26,12 +28,16 @@ end
 
 local app = {
     running = false,
+    intervalMinutes = 20,
+    snoozeMinutes = { 1, 5, 10 },
+    hoverSeconds = 10,
+    hoverCount = 3,
     reminderTimer = nil,
     hoverTimer = nil,               -- 系统级鼠标位置轮询，不依赖 WebView 的 mouseenter
-    stage = 0,                     -- 0: 提醒；1: 第一次确认；2: 第二次确认
+    stage = 0,                     -- 已完成的悬停确认次数；0 为初始提醒
     view = nil,                    -- 中央提醒窗口（含返回按钮）
     buttonView = nil,              -- 独立悬浮的随机确认按钮
-    snoozeViews = {},              -- 三个独立随机位置/颜色的延后按钮
+    snoozeViews = {},              -- 独立随机位置/颜色的延后按钮
     bridge = nil,
     hotkey = nil,
     activeScreen = nil,
@@ -223,62 +229,49 @@ function send(action, minutes, session) {
 </script></body></html>]]
 end
 
+local function confirmationLabel(stage)
+    if app.hoverCount == 1 or stage == app.hoverCount - 1 then return "确认关闭" end
+    return stage == 0 and "已休息" or "继续确认"
+end
+
 local function panelHTML(stage)
+    local label = confirmationLabel(stage)
+    local title = stage == 0 and "该让眼睛休息了" or string.format("第 %d / %d 次确认", stage + 1, app.hoverCount)
+    local subtitle = stage == 0 and "自然眨眼几次，再看看远处约 20 秒。"
+        or string.format("确认后，%g 分钟后重新提醒。", app.intervalMinutes)
+    local extra
     if stage == 0 then
-        return htmlShell([[
+        local minutes = {}
+        for _, value in ipairs(app.snoozeMinutes) do minutes[#minutes + 1] = tostring(value) end
+        extra = #minutes > 0
+            and '<p class="hint">忙碌中？寻找随机位置的「延后 ' .. table.concat(minutes, " / ") .. ' 分钟」按钮。</p>'
+            or ""
+    else
+        extra = string.format('<button class="back" onclick="send(\'back\', 0, %d)">返回提醒</button>', app.buttonSession)
+    end
+    return htmlShell(string.format([[
 <div class="panel">
   <div class="icon">👀</div>
-  <h1>该让眼睛休息了</h1>
-  <p class="subtitle">自然眨眼几次，再看看远处约 20 秒。</p>
-  <p class="search-hint">寻找「已休息」按钮，悬停 10 秒后点击</p>
+  <h1>%s</h1>
+  <p class="subtitle">%s</p>
+  <p class="search-hint">寻找「%s」按钮，悬停 %g 秒后点击</p>
   <div class="spacer"></div>
-  <p class="hint">忙碌中？寻找随机位置的「延后 1 / 5 / 10 分钟」按钮。</p>
-  <div class="footer">不会自动关闭 · 关闭需要两次确认</div>
-</div>]])
-    elseif stage == 1 then
-        return htmlShell([[
-<div class="panel">
-  <div class="icon">✓</div>
-  <h1>第一次确认</h1>
-  <p class="subtitle">你确定已经休息过眼睛，要结束本次提醒吗？</p>
-  <p class="search-hint">寻找「继续确认」，悬停 10 秒再点击</p>
-  <div class="spacer"></div>
-  <button class="back" onclick="send('back')">返回提醒</button>
-  <div class="footer">确认按钮已重新随机移动 · 还需第二次确认</div>
-</div>]])
-    else
-        return htmlShell([[
-<div class="panel">
-  <div class="icon">✓✓</div>
-  <h1>第二次确认</h1>
-  <p class="subtitle">再次确认结束本次提醒？</p>
-  <p class="hint">确认后，20分钟后重新提醒。</p>
-  <p class="search-hint">寻找「确认关闭」，悬停 10 秒再点击</p>
-  <div class="spacer"></div>
-  <button class="back" onclick="send('back')">返回提醒</button>
-  <div class="footer">位置与上一次不同 · 不确认不会自动关闭</div>
-</div>]])
-    end
+  %s
+  <div class="footer">不会自动关闭 · 共需 %d 次悬停确认 · 已完成 %d 次</div>
+</div>]], title, subtitle, label, app.hoverSeconds, extra, app.hoverCount, stage))
 end
 
 -- 倒计时由 Lua 定时检测鼠标位置，WebView 只负责显示状态和处理点击。
 -- 这样 Hammerspoon/网页窗口未获得焦点时，只要鼠标停在按钮上就会开始倒计时。
 -- Lua 端对确认点击再次检查持续悬停时间，禁止提前跳过。
 local function buttonHTML(stage)
-    local label, action
-    if stage == 0 then
-        label, action = "已休息", "closeStart"
-    elseif stage == 1 then
-        label, action = "继续确认", "confirm1"
-    else
-        label, action = "确认关闭", "confirm2"
-    end
+    local label, action = confirmationLabel(stage), "confirm"
     local color = randomButtonColor()
     local style = string.format('background:%s;color:%s;', color.bg, color.fg)
     local html = string.format([[
 <button class="floating" id="confirmation" style="%s" type="button" disabled>
   <span class="floating-label">%s</span>
-  <span class="floating-status" id="hover-status">悬停 %d 秒</span>
+  <span class="floating-status" id="hover-status">悬停 %g 秒</span>
 </button>
 <script>
 (function () {
@@ -305,7 +298,7 @@ local function buttonHTML(stage)
     send(confirmAction, 0, session);
   });
 })();
-</script>]], style, label, HOVER_SECONDS, app.buttonSession, action)
+</script>]], style, label, app.hoverSeconds, app.buttonSession, action)
     return htmlShell(html)
 end
 
@@ -313,7 +306,7 @@ local function snoozeHTML(minutes)
     local color = randomButtonColor()
     return htmlShell(string.format([[
 <button class="floating" style="background:%s;color:%s;cursor:pointer;" type="button"
-        onclick="send('snooze', %d, %d)">延后 %d 分钟</button>
+        onclick="send('snooze', %g, %d)">延后 %g 分钟</button>
 ]], color.bg, color.fg, minutes, app.buttonSession, minutes))
 end
 
@@ -366,14 +359,14 @@ local function pollHover()
             app.hoverStage = app.stage
         end
         local elapsed = (now - app.hoverStartedNs) / 1000000000
-        ready = elapsed >= HOVER_SECONDS
-        local remaining = math.max(0, math.ceil(HOVER_SECONDS - elapsed))
+        ready = elapsed >= app.hoverSeconds
+        local remaining = math.max(0, math.ceil(app.hoverSeconds - elapsed))
         message = ready and "可点击" or ("等待 " .. remaining .. " 秒")
     else
         app.hoverStartedNs = nil
         app.hoverStage = nil
         ready = false
-        message = "悬停 " .. HOVER_SECONDS .. " 秒"
+        message = "悬停 " .. app.hoverSeconds .. " 秒"
     end
 
     -- 只在显示文字/可点击状态变化时更新 WebView。
@@ -410,7 +403,7 @@ local function renderStage(stage)
     for _, view in ipairs(app.snoozeViews) do view:hide() end
     if stage == 0 then
         local occupied = { app.buttonRect }
-        for index, minutes in ipairs({ 1, 5, 10 }) do
+        for index, minutes in ipairs(app.snoozeMinutes) do
             local rect = randomButtonFrame(occupied)
             occupied[#occupied + 1] = rect
             local view = app.snoozeViews[index] or makeWindow(rect)
@@ -446,44 +439,61 @@ local function handleMessage(message)
     if not app.view or not app.view:isVisible() then return end
 
     local action = body.action
-    local isButtonAction = action == "closeStart" or action == "confirm1" or action == "confirm2"
+    -- 旧 WebView 页面可能异步发消息，不能影响当前提醒。
+    if (action == "confirm" or action == "snooze" or action == "back")
+       and tonumber(body.session) ~= app.buttonSession then return end
 
-    -- 旧 WebView 页面可能异步发消息，不能影响当前按钮的确认流程。
-    if (isButtonAction or action == "snooze") and tonumber(body.session) ~= app.buttonSession then return end
-
-    local isConfirmation = action == "closeStart" or action == "confirm1" or action == "confirm2"
-    if isConfirmation then
-        -- 使用单调时钟校验，不受系统时间更改影响。
+    if action == "confirm" then
+        -- 使用单调时钟校验持续悬停；点击不能跳过计时或阶段。
         if app.hoverStage ~= app.stage or not app.hoverStartedNs then return end
         if not mouseInsideRect(hs.mouse.absolutePosition(), app.buttonRect) then return end
-        if hs.timer.absoluteTime() - app.hoverStartedNs < HOVER_SECONDS * 1000000000 then return end
-        app.hoverStartedNs = nil
-        app.hoverStage = nil
-    end
-
-    if action == "snooze" and app.stage == 0 then
-        local minutes = tonumber(body.minutes)
-        if minutes == 1 or minutes == 5 or minutes == 10 then
+        if hs.timer.absoluteTime() - app.hoverStartedNs < app.hoverSeconds * 1000000000 then return end
+        if app.stage + 1 < app.hoverCount then
+            renderStage(app.stage + 1)
+        else
             hideViews()
-            scheduleNext(minutes * 60)
+            app.stage = 0
+            scheduleNext(app.intervalMinutes * 60)
         end
-    elseif action == "closeStart" and app.stage == 0 then
-        renderStage(1)
-    elseif action == "confirm1" and app.stage == 1 then
-        renderStage(2)
-    elseif action == "confirm2" and app.stage == 2 then
-        hideViews()
-        app.stage = 0
-        scheduleNext(NORMAL_INTERVAL)
+    elseif action == "snooze" and app.stage == 0 then
+        local minutes = tonumber(body.minutes)
+        for _, allowed in ipairs(app.snoozeMinutes) do
+            if minutes == allowed then
+                hideViews()
+                scheduleNext(minutes * 60)
+                break
+            end
+        end
     elseif action == "back" and app.stage ~= 0 then
         renderStage(0)
     end
 end
 
 function M.start(options)
-    local hotkey = options and options.hotkey
-    -- 重复 .start() 不会注册多个定时器/热键。
+    -- 重复 .start() 不会注册多个定时器/热键；修改配置请先 .stop()。
     if app.running then return M end
+    options = options or {}
+    local function positive(value, fallback, name)
+        if value == nil then value = fallback end
+        assert(type(value) == "number" and value > 0 and value < math.huge,
+            name .. " 必须为正数")
+        return value
+    end
+    local interval = positive(options.intervalMinutes, 20, "intervalMinutes")
+    local seconds = positive(options.hoverSeconds, 10, "hoverSeconds")
+    local count = positive(options.hoverCount, 3, "hoverCount")
+    assert(count % 1 == 0, "hoverCount 必须为正整数")
+    local snoozes, seen = {}, {}
+    local configuredSnoozes = options.snoozeMinutes or { 1, 5, 10 }
+    assert(type(configuredSnoozes) == "table", "snoozeMinutes 必须为数组")
+    for _, value in ipairs(configuredSnoozes) do
+        positive(value, nil, "snoozeMinutes 中的时间")
+        assert(not seen[value], "snoozeMinutes 不能包含重复时间")
+        snoozes[#snoozes + 1], seen[value] = value, true
+    end
+    app.intervalMinutes, app.hoverSeconds, app.hoverCount = interval, seconds, count
+    app.snoozeMinutes = snoozes
+    local hotkey = options.hotkey
     cleanupPreviousVersion()
     app.running = true
     app.stage = 0
@@ -493,7 +503,7 @@ function M.start(options)
         app.hotkey = hs.hotkey.bind(hotkey.mods, hotkey.key, showReminder)
     end
     _G.blinkReminderApp = app
-    scheduleNext(NORMAL_INTERVAL)
+    scheduleNext(app.intervalMinutes * 60)
     return M
 end
 

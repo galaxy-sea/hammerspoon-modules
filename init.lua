@@ -34,6 +34,10 @@ require("modules.close_last_window_hide").start({
 
 -- 测试快捷键默认不绑定，定时提醒照常启动；测试时将 hotkey.bind 改为 true。
 require("modules.blink_reminder").start({
+    intervalMinutes = 30,        -- 每轮提醒间隔（分钟）
+    snoozeMinutes = { 5, 10 }, -- 可延后的分钟数；{} 禁用延后
+    hoverSeconds = 10,           -- 每次连续悬停时间（秒）
+    hoverCount = 3,              -- 关闭共需悬停并点击的次数，含「已休息」这一次
     hotkey = {
         mods = { "ctrl", "alt", "cmd" },
         key = "B",
