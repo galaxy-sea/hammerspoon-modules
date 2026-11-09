@@ -57,4 +57,19 @@ require("modules.scheduled_webpages").start({
     },
 })
 
+
+-- 规则省略时使用第一项；"choose" 从全局配置中选择，也可传自定义数组。
+require("modules.browser-dispatcher").start({
+    browsers = { "chrome", "edge", "safari", "firefox" },
+    profiles = { "Default", "Profile 1" }, -- Firefox 按 Profile 名称匹配
+    -- logLevel = "debug",
+    rules = {
+        {
+            urls = "www.jlc.com/newOrder", -- 字符串或数组；高级匹配另用 patterns（Lua 模式）
+            profile = "choose",
+        },
+    },
+})
+
+
 hs.alert.show("Hammerspoon 配置已加载")
