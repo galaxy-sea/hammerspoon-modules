@@ -55,20 +55,25 @@ require("modules.browser-dispatcher").start({
 local M = {}
 local dispatcher, profileChooser, browserChooser
 local previousCallback, dispatchCallback
+local activeTasks = {}
 
 local profileBrowsers = {
-    chrome = { id = "com.google.Chrome", app = "Google Chrome" },
-    edge = { id = "com.microsoft.edgemac", app = "Microsoft Edge" },
-    firefox = { id = "org.mozilla.firefox", app = "Firefox" },
+    chrome = { id = "com.google.Chrome", executable = "Google Chrome" },
+    edge = { id = "com.microsoft.edgemac", executable = "Microsoft Edge" },
+    firefox = { id = "org.mozilla.firefox", executable = "firefox" },
 }
 
 local function openProfile(browser, profile)
     return function(url)
-        local app = profileBrowsers[browser].app
-        local args = { "-n", "-a", app, "--args" }
+        local info = profileBrowsers[browser]
+        local appPath = hs.application.pathForBundleID(info.id)
+        if not appPath then
+            hs.alert.show("未找到 " .. info.executable)
+            return
+        end
+        local executable = appPath .. "/Contents/MacOS/" .. info.executable
+        local args = {}
         if browser == "firefox" then
-            -- Firefox 使用 Profile 名称。
-            args[#args + 1] = "--no-remote"
             args[#args + 1] = "-P"
             args[#args + 1] = profile
             args[#args + 1] = "--new-tab"
@@ -76,10 +81,23 @@ local function openProfile(browser, profile)
             args[#args + 1] = "--profile-directory=" .. profile
         end
         args[#args + 1] = url
-        local task = hs.task.new("/usr/bin/open", function(code, _, stderr)
-            if code ~= 0 then hs.printf("%s error: %s", app, stderr or "unknown") end
+        local task
+        task = hs.task.new(executable, function(code, _, stderr)
+            activeTasks[task] = nil
+            if code ~= 0 then
+                hs.printf("%s error: %s", info.executable, stderr or "unknown")
+                hs.alert.show("无法打开 " .. info.executable .. "，请查看控制台")
+            end
         end, args)
-        if not task or not task:start() then hs.alert.show("无法启动 " .. app) end
+        if not task then
+            hs.alert.show("无法启动 " .. info.executable)
+            return
+        end
+        activeTasks[task] = true
+        if not task:start() then
+            activeTasks[task] = nil
+            hs.alert.show("无法启动 " .. info.executable)
+        end
     end
 end
 
@@ -175,7 +193,7 @@ function M.start(config)
                     profileChooser = hs.chooser.new(function(choice)
                         if choice then openProfile(name, choice.profile)(url) end
                     end)
-                    profileChooser:placeholderText("选择 " .. info.app .. " Profile")
+                    profileChooser:placeholderText("选择 " .. info.executable .. " Profile")
                     profileChooser:choices(choices)
                     profileChooser:rows(math.min(#choices, 10))
                     profileChooser:show()

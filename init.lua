@@ -66,7 +66,7 @@ require("modules.scheduled_webpages").start({
 require("modules.browser-dispatcher").start({
     browsers = { "chrome", "edge", "safari", "firefox" },
     profiles = { "Default", "Profile 1" }, -- Firefox 按 Profile 名称匹配
-    -- logLevel = "debug",
+    logLevel = "debug",
     rules = {
         {
             urls = "www.jlc.com/newOrder", -- 字符串或数组；高级匹配另用 patterns（Lua 模式）
