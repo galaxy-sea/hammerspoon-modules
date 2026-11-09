@@ -12,4 +12,4 @@ Hammerspoon 脚本集合，功能及快捷键由 `init.lua` 统一配置。
 | [blink_reminder.lua](modules/blink_reminder.lua) | 每 20 分钟提醒休息，支持延后及悬停确认关闭。 | 测试快捷键：`Ctrl + Option + Cmd + B`，默认不绑定。 |
 | [android_moorage.lua](modules/android_moorage.lua) | 有可用 Android 设备时启动 Moorage，无可用设备时退出；重新启动前等待退出完成。 | 监听：USB 插拔及 Moorage 退出；每次插拔查询一次 ADB，无快捷键。 |
 | [scheduled_webpages.lua](modules/scheduled_webpages.lua) | 使用 Cron 表达式定时打开网页，支持链接与 Cron 数组，使用系统默认浏览器。 | 定时触发；无快捷键。 |
-| [browser-dispatcher.lua](modules/browser-dispatcher.lua) | 按网址或来源应用分发链接，支持 Chrome、Edge、Safari、Firefox，以及浏览器和 Profile 选择。 | 接管系统 HTTP/HTTPS 链接；无快捷键。 |
+| [browser_dispatcher.lua](modules/browser-dispatcher.lua) | 按网址或来源应用分发链接，支持 Chrome、Edge、Safari、Firefox，以及浏览器和 Profile 选择。 | 接管系统 HTTP/HTTPS 链接；无快捷键。 |
