@@ -63,15 +63,22 @@ local profileBrowsers = {
     firefox = { id = "org.mozilla.firefox", executable = "firefox" },
 }
 
+-- 模块加载时解析安装目录和完整启动路径；安装或移动浏览器后重新加载配置。
+for _, info in pairs(profileBrowsers) do
+    info.appPath = hs.application.pathForBundleID(info.id)
+    if info.appPath then
+        info.executablePath = info.appPath .. "/Contents/MacOS/" .. info.executable
+    end
+end
+
 local function openProfile(browser, profile)
     return function(url)
         local info = profileBrowsers[browser]
-        local appPath = hs.application.pathForBundleID(info.id)
-        if not appPath then
+        if not info.executablePath then
             hs.alert.show("未找到 " .. info.executable)
             return
         end
-        local executable = appPath .. "/Contents/MacOS/" .. info.executable
+        local executable = info.executablePath
         local args = {}
         if browser == "firefox" then
             args[#args + 1] = "-P"
@@ -81,6 +88,15 @@ local function openProfile(browser, profile)
             args[#args + 1] = "--profile-directory=" .. profile
         end
         args[#args + 1] = url
+        -- Chrome 未运行时通过 LaunchServices 启动；已运行时直接传参给浏览器。
+        if browser == "chrome" then
+            local running = hs.application.applicationsForBundleID(info.id) or {}
+            if #running == 0 then
+                local launchArgs = { "-a", info.appPath, "--args" }
+                for _, arg in ipairs(args) do launchArgs[#launchArgs + 1] = arg end
+                executable, args = "/usr/bin/open", launchArgs
+            end
+        end
         local task
         task = hs.task.new(executable, function(code, _, stderr)
             activeTasks[task] = nil
