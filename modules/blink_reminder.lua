@@ -1,6 +1,6 @@
 -- ~/.hammerspoon/modules/blink_reminder.lua
 -- 每20分钟提醒一次；可延后1/5/10分钟；关闭须经过两次确认。
--- 三个关闭按钮各自在显示器随机位置出现、每次随机换色。
+-- 关闭按钮和延后 1/5/10 分钟按钮在显示器随机位置出现、每次随机换色。
 -- Hammerspoon 全局检测鼠标位置：无需点击，进入按钮区域立即开始连续悬停10秒计时。
 -- 不自动关闭、不淡出、不创建菜单栏倒计时。
 -- 使用：require("modules.blink_reminder").start({ hotkey = { mods = {...}, key = "..." } })
@@ -29,8 +29,9 @@ local app = {
     reminderTimer = nil,
     hoverTimer = nil,               -- 系统级鼠标位置轮询，不依赖 WebView 的 mouseenter
     stage = 0,                     -- 0: 提醒；1: 第一次确认；2: 第二次确认
-    view = nil,                    -- 中央提醒窗口（含延后按钮、返回按钮）
+    view = nil,                    -- 中央提醒窗口（含返回按钮）
     buttonView = nil,              -- 独立悬浮的随机确认按钮
+    snoozeViews = {},              -- 三个独立随机位置/颜色的延后按钮
     bridge = nil,
     hotkey = nil,
     activeScreen = nil,
@@ -61,6 +62,7 @@ local function cleanupPreviousVersion()
     if old.menu then old.menu:delete() end
     if old.view then old.view:delete() end
     if old.buttonView then old.buttonView:delete() end
+    for _, view in ipairs(old.snoozeViews or {}) do view:delete() end
     if old.bridge then old.bridge:setCallback(nil) end
     _G.blinkReminderApp = nil
 end
@@ -92,7 +94,7 @@ end
 
 -- 随机坐标覆盖当前显示器的可用区域（扣除菜单栏和Dock），不局限九宫格。
 -- 还会尽量远离上一次按钮的位置，防止在固定位置连续点击。
-local function randomButtonFrame()
+local function randomButtonFrame(occupied)
     local f = (app.activeScreen or hs.screen.mainScreen()):frame()
     local w = math.max(90, math.min(BUTTON_WIDTH, f.w - EDGE_MARGIN * 2))
     local h = math.max(36, math.min(BUTTON_HEIGHT, f.h - EDGE_MARGIN * 2))
@@ -103,6 +105,13 @@ local function randomButtonFrame()
     local last = app.lastButtonRect
     local minDistance = math.min(f.w, f.h) * 0.38
     local best, bestScore = nil, -math.huge
+    local function blocked(rect)
+        if overlapsWithMargin(rect, panel, PANEL_CLEARANCE) then return true end
+        for _, other in ipairs(occupied or {}) do
+            if overlapsWithMargin(rect, other, EDGE_MARGIN) then return true end
+        end
+        return false
+    end
 
     for _ = 1, RANDOM_TRIES do
         local rect = {
@@ -110,7 +119,7 @@ local function randomButtonFrame()
             y = math.floor(minY + math.random() * spanY),
             w = w, h = h,
         }
-        if not overlapsWithMargin(rect, panel, PANEL_CLEARANCE) then
+        if not blocked(rect) then
             local distance = last and centerDistance(rect, last) or math.huge
             -- 找不到足够远的位置时，退而选相距最远的候选位置。
             if distance > bestScore then
@@ -133,7 +142,7 @@ local function randomButtonFrame()
             }
             local distance = last and centerDistance(rect, last) or math.huge
             local score = distance
-            if overlapsWithMargin(rect, panel, PANEL_CLEARANCE) then
+            if blocked(rect) then
                 score = score - 100000
             end
             if score > bestScore then
@@ -185,10 +194,7 @@ p { margin:5px 0; line-height:1.5; }
 .hint { color:#b6c7d0; font-size:13px; }
 .icon { font-size:34px; }
 .spacer { flex:1; min-height:12px; }
-.delay-label { font-size:12px; color:#b6c7d0; text-align:left; margin-bottom:9px; }
-.buttons-row { display:flex; gap:11px; }
 button { font:inherit; cursor:pointer; border:0; border-radius:11px; min-height:43px; font-weight:600; }
-.buttons-row button { flex:1; background:#d5e3e7; color:#213039; }
 .back { margin-top:16px; background:#42525e; color:#f1f5f7; }
 .footer { color:#98acb7; font-size:11px; margin-top:15px; }
 .search-hint { margin-top:16px; font-size:15px; font-weight:600; color:#c8e1d5; }
@@ -226,12 +232,7 @@ local function panelHTML(stage)
   <p class="subtitle">自然眨眼几次，再看看远处约 20 秒。</p>
   <p class="search-hint">寻找「已休息」按钮，悬停 10 秒后点击</p>
   <div class="spacer"></div>
-  <p class="delay-label">忙碌中？仅延后本次提醒：</p>
-  <div class="buttons-row">
-    <button onclick="send('snooze', 1)">延后 1 分钟</button>
-    <button onclick="send('snooze', 5)">延后 5 分钟</button>
-    <button onclick="send('snooze', 10)">延后 10 分钟</button>
-  </div>
+  <p class="hint">忙碌中？寻找随机位置的「延后 1 / 5 / 10 分钟」按钮。</p>
   <div class="footer">不会自动关闭 · 关闭需要两次确认</div>
 </div>]])
     elseif stage == 1 then
@@ -306,6 +307,14 @@ local function buttonHTML(stage)
 })();
 </script>]], style, label, HOVER_SECONDS, app.buttonSession, action)
     return htmlShell(html)
+end
+
+local function snoozeHTML(minutes)
+    local color = randomButtonColor()
+    return htmlShell(string.format([[
+<button class="floating" style="background:%s;color:%s;cursor:pointer;" type="button"
+        onclick="send('snooze', %d, %d)">延后 %d 分钟</button>
+]], color.bg, color.fg, minutes, app.buttonSession, minutes))
 end
 
 local function makeWindow(rect)
@@ -383,6 +392,7 @@ local function hideViews()
     app.buttonRect = nil
     if app.buttonView then app.buttonView:hide() end
     if app.view then app.view:hide() end
+    for _, view in ipairs(app.snoozeViews) do view:hide() end
 end
 
 local function renderStage(stage)
@@ -397,6 +407,19 @@ local function renderStage(stage)
     app.buttonView:frame(app.buttonRect)
     app.buttonView:html(buttonHTML(stage))
     app.buttonView:show():bringToFront(true)
+    for _, view in ipairs(app.snoozeViews) do view:hide() end
+    if stage == 0 then
+        local occupied = { app.buttonRect }
+        for index, minutes in ipairs({ 1, 5, 10 }) do
+            local rect = randomButtonFrame(occupied)
+            occupied[#occupied + 1] = rect
+            local view = app.snoozeViews[index] or makeWindow(rect)
+            app.snoozeViews[index] = view
+            view:frame(rect)
+            view:html(snoozeHTML(minutes))
+            view:show():bringToFront(true)
+        end
+    end
     -- 不用先点一次按钮；立即开始检测鼠标是否进入按钮区域。
     app.hoverTimer = hs.timer.doEvery(0.1, pollHover)
     pollHover()
@@ -426,7 +449,7 @@ local function handleMessage(message)
     local isButtonAction = action == "closeStart" or action == "confirm1" or action == "confirm2"
 
     -- 旧 WebView 页面可能异步发消息，不能影响当前按钮的确认流程。
-    if isButtonAction and tonumber(body.session) ~= app.buttonSession then return end
+    if (isButtonAction or action == "snooze") and tonumber(body.session) ~= app.buttonSession then return end
 
     local isConfirmation = action == "closeStart" or action == "confirm1" or action == "confirm2"
     if isConfirmation then
@@ -480,6 +503,8 @@ function M.stop()
     if app.hotkey then app.hotkey:delete(); app.hotkey = nil end
     if app.buttonView then app.buttonView:delete(); app.buttonView = nil end
     if app.view then app.view:delete(); app.view = nil end
+    for _, view in ipairs(app.snoozeViews) do view:delete() end
+    app.snoozeViews = {}
     if app.bridge then app.bridge:setCallback(nil); app.bridge = nil end
     app.stage = 0
     app.running = false
