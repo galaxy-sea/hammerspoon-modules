@@ -88,8 +88,8 @@ local function openProfile(browser, profile)
             args[#args + 1] = "--profile-directory=" .. profile
         end
         args[#args + 1] = url
-        -- Chrome 未运行时通过 LaunchServices 启动；已运行时直接传参给浏览器。
-        if browser == "chrome" then
+        -- Chrome/Edge 未运行时通过 LaunchServices 启动；已运行时直接传参给浏览器。
+        if browser == "chrome" or browser == "edge" then
             local running = hs.application.applicationsForBundleID(info.id) or {}
             if #running == 0 then
                 local launchArgs = { "-a", info.appPath, "--args" }
