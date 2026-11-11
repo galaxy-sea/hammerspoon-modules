@@ -1,7 +1,7 @@
 --[[
 -- 将以下配置放在 init.lua 中；rules 从上到下匹配，首条命中后执行。
 -- 未匹配链接使用 browsers 和 profiles 的第一项。
-require("modules.browser-dispatcher").start({
+require("modules.browser_dispatcher").start({
     browsers = { "chrome", "edge", "safari", "firefox" }, -- 可选浏览器及显示顺序，第一项为默认
     profiles = { "Default", "Profile 1" }, -- Chrome/Edge 使用目录名；Firefox 使用 about:profiles 中的名称
     logLevel = "info", -- 可省略；调试时改为 "debug"
@@ -56,19 +56,71 @@ local M = {}
 local dispatcher, profileChooser, browserChooser
 local previousCallback, dispatchCallback
 local activeTasks = {}
+local activeSockets = {}
 
 local profileBrowsers = {
-    chrome = { id = "com.google.Chrome", executable = "Google Chrome" },
-    edge = { id = "com.microsoft.edgemac", executable = "Microsoft Edge" },
+    chrome = { id = "com.google.Chrome", executable = "Google Chrome", dataDirectory = "Google/Chrome" },
+    edge = { id = "com.microsoft.edgemac", executable = "Microsoft Edge", dataDirectory = "Microsoft Edge" },
     firefox = { id = "org.mozilla.firefox", executable = "firefox" },
 }
 
 -- 模块加载时解析安装目录和完整启动路径；安装或移动浏览器后重新加载配置。
 for _, info in pairs(profileBrowsers) do
+    if info.dataDirectory and os.getenv("HOME") then
+        info.dataPath = os.getenv("HOME") .. "/Library/Application Support/" .. info.dataDirectory
+    end
     info.appPath = hs.application.pathForBundleID(info.id)
     if info.appPath then
         info.executablePath = info.appPath .. "/Contents/MacOS/" .. info.executable
     end
+end
+
+local function sendSingleton(info, profile, url)
+    local request = {}
+    activeSockets[request] = true
+    local function finish(err)
+        if request.done then return end
+        request.done = true
+        activeSockets[request] = nil
+        if request.timer then request.timer:stop() end
+        if request.socket then request.socket:disconnect() end
+        if err then
+            hs.printf("%s IPC error: %s", info.executable, err)
+            hs.alert.show("无法打开 " .. info.executable .. "，请查看控制台")
+        end
+    end
+    request.cancel = function() finish() end
+    request.timer = hs.timer.doAfter(0.5, function() finish("Singleton 通信超时，未收到 ACK") end)
+    if not info.dataPath then finish("无法确定用户数据目录"); return end
+    local fields = { "START", hs.fs.currentDir() or "/", info.executablePath,
+        "--profile-directory=" .. profile, url }
+    for _, field in ipairs(fields) do
+        if field:find("\0", 1, true) then finish("消息字段不能包含 NUL 字符"); return end
+    end
+    local message = table.concat(fields, "\0")
+    if #message > 32768 then finish("Singleton 消息超过 32768 字节"); return end
+
+    -- hs.socket 使用 URL 解析路径，转义空格等字符；操作系统直接跟随符号链接。
+    local socketPath = (info.dataPath .. "/SingletonSocket"):gsub("([^%w/._~%-])", function(char)
+        return string.format("%%%02X", string.byte(char))
+    end)
+    local socket = hs.socket.new(function(response)
+        if request.done then return end
+        finish(response ~= "ACK" and ("浏览器响应异常：" .. tostring(response)) or nil)
+    end)
+    request.socket = socket
+    socket:setTimeout(0.5)
+    local ok, connected = pcall(function()
+        return socket:connect(socketPath, function()
+            if request.done then return end
+            local sent, err = pcall(function()
+                socket:write(message)
+                socket:read(3)
+            end)
+            if not sent then finish("发送请求失败：" .. tostring(err)) end
+        end)
+    end)
+    if not ok or not connected then finish("无法连接 SingletonSocket") end
 end
 
 local function openProfile(browser, profile)
@@ -77,6 +129,14 @@ local function openProfile(browser, profile)
         if not info.executablePath then
             hs.alert.show("未找到 " .. info.executable)
             return
+        end
+        local chromium = browser == "chrome" or browser == "edge"
+        if chromium then
+            local running = hs.application.applicationsForBundleID(info.id) or {}
+            if #running > 0 then
+                sendSingleton(info, profile, url)
+                return
+            end
         end
         local executable = info.executablePath
         local args = {}
@@ -88,14 +148,11 @@ local function openProfile(browser, profile)
             args[#args + 1] = "--profile-directory=" .. profile
         end
         args[#args + 1] = url
-        -- Chrome/Edge 未运行时通过 LaunchServices 启动；已运行时直接传参给浏览器。
-        if browser == "chrome" or browser == "edge" then
-            local running = hs.application.applicationsForBundleID(info.id) or {}
-            if #running == 0 then
-                local launchArgs = { "-a", info.appPath, "--args" }
-                for _, arg in ipairs(args) do launchArgs[#launchArgs + 1] = arg end
-                executable, args = "/usr/bin/open", launchArgs
-            end
+        -- Chromium 未运行时才经 LaunchServices 启动；已运行时只走 Unix Socket。
+        if chromium then
+            local launchArgs = { "-a", info.appPath, "--args" }
+            for _, arg in ipairs(args) do launchArgs[#launchArgs + 1] = arg end
+            executable, args = "/usr/bin/open", launchArgs
         end
         local task
         task = hs.task.new(executable, function(code, _, stderr)
@@ -118,6 +175,9 @@ local function openProfile(browser, profile)
 end
 
 function M.stop()
+    local pending = {}
+    for request in pairs(activeSockets) do pending[#pending + 1] = request end
+    for _, request in ipairs(pending) do request.cancel() end
     if browserChooser then
         browserChooser:hide()
         browserChooser = nil
