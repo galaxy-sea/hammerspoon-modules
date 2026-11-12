@@ -45,9 +45,8 @@ require("modules.blink_reminder").start({
     },
 })
 
--- USB 插拔时查询 ADB：有可用 Android 设备则启动指定软件，否则请求正常退出。
-require("modules.android_MTP_finder").start({
-    adb = "/opt/homebrew/bin/adb",
+-- USB 插拔时检查 MTP 接口：检测到后启动指定软件，否则请求正常退出。
+require("modules.usb_MTP_finder").start({
     appBundleID = "com.sudomaker.MacMTP",
     disconnectDelay = 1, -- 确认无可用设备后等待 1 秒，再请求正常退出一次。
 })

@@ -1,21 +1,17 @@
 -- https://github.com/ClassicOldSong/MacMTP
 -- https://github.com/skuthus/Moorage  不好用 大文件经常传输失败
--- 需要 adb 
--- brew install android-platform-tools
 
 --[[
-require("modules.android_MTP_finder").start({
-    adb = "/opt/homebrew/bin/adb",
+require("modules.usb_MTP_finder").start({
     appBundleID = "com.sudomaker.MacMTP", -- 必填：用户指定要启动和退出的软件
     -- appName = "MacMTP", -- 可选：日志显示名称，省略时使用 Bundle ID
     disconnectDelay = 1,
     queryTimeout = 10,
 })
 ]]
--- 启动时及 USB 插拔后各查询一次 ADB；无常驻监听进程、无自动重查。
+-- 启动时及 USB 插拔后各查询一次 USB 接口；无常驻监听进程、无自动重查。
 local M = {}
 local defaults = {
-    adb = "/opt/homebrew/bin/adb",
     disconnectDelay = 1,
     queryTimeout = 10,
 }
@@ -25,7 +21,7 @@ local running, available, devices, lastError = false, nil, {}, nil
 local revision, checkPending = 0, false
 local quitRequested = {} -- PID -> 应用实例；一直保留到进程完全退出。
 local restartPending = false
-local log = hs.logger.new("android_MTP_finder", "info")
+local log = hs.logger.new("usb_MTP_finder", "info")
 local query, requestCheck
 
 local function stopTimer(timer) if timer then timer:stop() end end
@@ -71,7 +67,7 @@ local function reconcile()
         end
         restartPending = false
         if #apps == 0 then
-            log.i("存在可用 Android 设备，启动 " .. cfg.appName)
+            log.i("检测到 MTP 接口，启动 " .. cfg.appName)
             if not hs.application.launchOrFocusByBundleID(cfg.appBundleID) then
                 log.e("无法启动应用：" .. cfg.appBundleID .. "；等待下一次检查")
             end
@@ -90,24 +86,25 @@ local function reconcile()
 end
 
 local function snapshot(output)
-    local nextDevices, headerSeen = {}, false
-    for line in ((output or "") .. "\n"):gmatch("([^\n]*)\n") do
-        line = line:gsub("\r$", "")
-        if line:match("^List of devices attached%s*$") then
-            headerSeen = true
-        elseif line:match("%S") then
-            assert(headerSeen, "ADB 设备列表缺少标题")
-            local serial, state = line:match("^%s*(%S+)%s+(%S+)")
-            assert(serial and state, "ADB 设备列表格式无效")
-            if state == "device" then nextDevices[#nextDevices + 1] = serial end
+    local interfaces = hs.plist.readString(output)
+    assert(type(interfaces) == "table", "ioreg 未返回有效 USB 接口列表")
+    local nextDevices, seen = {}, {}
+    for _, interface in ipairs(interfaces) do
+        -- 仅接口明确声明 MTP 时命中；不把同为 6/1/1 的 PTP 相机误判为 MTP。
+        local name = interface["USB Interface Name"] or interface.kUSBString or interface.IORegistryEntryName or ""
+        if tostring(name):upper():find("MTP", 1, true) then
+            local id = tostring(interface.locationID or interface.IORegistryEntryID or "")
+            if id ~= "" and not seen[id] then
+                seen[id] = true
+                nextDevices[#nextDevices + 1] = id
+            end
         end
     end
-    assert(headerSeen, "ADB 未返回有效设备列表")
     table.sort(nextDevices)
     local changed = available == nil or table.concat(nextDevices, "\n") ~= table.concat(devices, "\n")
     devices, available, lastError = nextDevices, #nextDevices > 0, nil
     if changed then
-        log.d("可用 Android 设备：" .. #devices .. (#devices > 0 and ("；" .. table.concat(devices, ", ")) or ""))
+        log.d("MTP USB 设备：" .. #devices .. (#devices > 0 and ("；" .. table.concat(devices, ", ")) or ""))
     end
     stopTimer(actionTimer)
     local currentRevision = revision
@@ -122,7 +119,7 @@ query = function()
     checkPending = false
     local currentRevision = revision
     local task
-    task = hs.task.new(cfg.adb, safe(function(code, stdout, stderr)
+    task = hs.task.new("/usr/sbin/ioreg", safe(function(code, stdout, stderr)
         if not running or queryTask ~= task then return end
         queryTask = nil
         stopTimer(timeoutTimer); timeoutTimer = nil
@@ -130,17 +127,17 @@ query = function()
         if revision == currentRevision then
             if code == 0 then
                 local ok, err = pcall(snapshot, stdout)
-                if not ok then queryFailed("解析 ADB 设备列表失败：" .. short(err)) end
+                if not ok then queryFailed("解析 USB 接口列表失败：" .. short(err)) end
             else
-                queryFailed("ADB 查询失败，exit=" .. tostring(code) .. "；" .. short(stderr))
+                queryFailed("USB 接口查询失败，exit=" .. tostring(code) .. "；" .. short(stderr))
             end
         end
         if checkPending then query() end
-    end), { "devices" })
+    end), { "-a", "-r", "-c", "IOUSBHostInterface", "-d", "1" })
     queryTask = task
     if not task or not task:start() then
         queryTask = nil
-        queryFailed("无法启动 ADB：" .. cfg.adb)
+        queryFailed("无法启动 ioreg")
         if checkPending then query() end
         return
     end
@@ -148,7 +145,7 @@ query = function()
         if queryTask ~= task then return end
         timeoutTimer = nil
         stopTask()
-        if revision == currentRevision then queryFailed("ADB 设备查询超时") end
+        if revision == currentRevision then queryFailed("USB 接口查询超时") end
         if checkPending then query() end
     end))
 end
@@ -173,10 +170,9 @@ function M.start(options)
         cfg[key] = value
     end
     cfg.appName = cfg.appName or cfg.appBundleID
-    for _, key in ipairs({ "adb", "appBundleID", "appName" }) do
+    for _, key in ipairs({ "appBundleID", "appName" }) do
         assert(type(cfg[key]) == "string" and cfg[key] ~= "", key .. " 不能为空")
     end
-    assert(cfg.adb:sub(1, 1) == "/", "adb 必须为绝对路径")
     assert(type(cfg.queryTimeout) == "number" and cfg.queryTimeout > 0, "queryTimeout 必须 > 0")
     assert(type(cfg.disconnectDelay) == "number" and cfg.disconnectDelay >= 0, "disconnectDelay 必须 >= 0")
     running, available, devices, lastError = true, nil, {}, nil
@@ -193,7 +189,7 @@ function M.start(options)
         quitRequested[pid] = nil
         log.d(cfg.appName .. " 进程已完全退出；PID=" .. pid)
         if restartPending and next(quitRequested) == nil and available == true then
-            reconcile() -- 使用最近一次已确认的设备状态，不增加 ADB 查询或启动重试。
+            reconcile() -- 使用最近一次已确认的设备状态，不增加 USB 查询或启动重试。
         end
     end)):start()
     local previousCallback = hs.shutdownCallback
@@ -216,7 +212,7 @@ function M.stop()
     timeoutTimer, actionTimer = nil, nil
     if usbWatcher then usbWatcher:stop(); usbWatcher = nil end
     if appWatcher then appWatcher:stop(); appWatcher = nil end
-    stopTask() -- 不执行 kill-server，不影响其他 ADB 客户端。
+    stopTask()
     if hs.shutdownCallback == shutdownHook then hs.shutdownCallback = previousShutdown end
     log.d("模块已停止")
 end
