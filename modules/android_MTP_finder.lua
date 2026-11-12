@@ -1,9 +1,21 @@
+-- https://github.com/ClassicOldSong/MacMTP
+-- https://github.com/skuthus/Moorage  不好用 大文件经常传输失败
+-- 需要 adb 
+-- brew install android-platform-tools
+
+--[[
+require("modules.android_MTP_finder").start({
+    adb = "/opt/homebrew/bin/adb",
+    appBundleID = "com.sudomaker.MacMTP", -- 必填：用户指定要启动和退出的软件
+    -- appName = "MacMTP", -- 可选：日志显示名称，省略时使用 Bundle ID
+    disconnectDelay = 1,
+    queryTimeout = 10,
+})
+]]
 -- 启动时及 USB 插拔后各查询一次 ADB；无常驻监听进程、无自动重查。
 local M = {}
 local defaults = {
     adb = "/opt/homebrew/bin/adb",
-    appBundleID = "com.skylerschoos.moorage",
-    appName = "Moorage",
     disconnectDelay = 1,
     queryTimeout = 10,
 }
@@ -13,7 +25,7 @@ local running, available, devices, lastError = false, nil, {}, nil
 local revision, checkPending = 0, false
 local quitRequested = {} -- PID -> 应用实例；一直保留到进程完全退出。
 local restartPending = false
-local log = hs.logger.new("android_moorage", "info")
+local log = hs.logger.new("android_MTP_finder", "info")
 local query, requestCheck
 
 local function stopTimer(timer) if timer then timer:stop() end end
@@ -53,7 +65,7 @@ local function reconcile()
             else quitRequested[pid] = nil end
         end
         if exiting then
-            if not restartPending then log.i("Moorage 正在退出，等待进程完全结束后再启动") end
+            if not restartPending then log.d(cfg.appName .. " 正在退出，等待进程完全结束后再启动") end
             restartPending = true
             return
         end
@@ -95,7 +107,7 @@ local function snapshot(output)
     local changed = available == nil or table.concat(nextDevices, "\n") ~= table.concat(devices, "\n")
     devices, available, lastError = nextDevices, #nextDevices > 0, nil
     if changed then
-        log.i("可用 Android 设备：" .. #devices .. (#devices > 0 and ("；" .. table.concat(devices, ", ")) or ""))
+        log.d("可用 Android 设备：" .. #devices .. (#devices > 0 and ("；" .. table.concat(devices, ", ")) or ""))
     end
     stopTimer(actionTimer)
     local currentRevision = revision
@@ -147,7 +159,7 @@ requestCheck = function(reason)
     available = nil -- 不使用 USB 变化前的设备状态启动或关闭应用。
     checkPending = true
     stopTimer(actionTimer); actionTimer = nil
-    log.i(reason)
+    log.d(reason)
     -- 有查询在运行时合并新事件，等旧查询退出后立即查询最新状态，不并发查询。
     query()
 end
@@ -157,9 +169,10 @@ function M.start(options)
     cfg = {}
     for key, value in pairs(defaults) do cfg[key] = value end
     for key, value in pairs(options or {}) do
-        assert(defaults[key] ~= nil, "未知配置：" .. tostring(key))
+        assert(defaults[key] ~= nil or key == "appBundleID" or key == "appName", "未知配置：" .. tostring(key))
         cfg[key] = value
     end
+    cfg.appName = cfg.appName or cfg.appBundleID
     for _, key in ipairs({ "adb", "appBundleID", "appName" }) do
         assert(type(cfg[key]) == "string" and cfg[key] ~= "", key .. " 不能为空")
     end
@@ -178,7 +191,7 @@ function M.start(options)
         local pid = app and app:pid()
         if not pid or not quitRequested[pid] then return end
         quitRequested[pid] = nil
-        log.i("Moorage 进程已完全退出；PID=" .. pid)
+        log.d(cfg.appName .. " 进程已完全退出；PID=" .. pid)
         if restartPending and next(quitRequested) == nil and available == true then
             reconcile() -- 使用最近一次已确认的设备状态，不增加 ADB 查询或启动重试。
         end
@@ -205,7 +218,7 @@ function M.stop()
     if appWatcher then appWatcher:stop(); appWatcher = nil end
     stopTask() -- 不执行 kill-server，不影响其他 ADB 客户端。
     if hs.shutdownCallback == shutdownHook then hs.shutdownCallback = previousShutdown end
-    log.i("模块已停止")
+    log.d("模块已停止")
 end
 
 -- 如需主动刷新设备状态，可从控制台手动调用一次。
