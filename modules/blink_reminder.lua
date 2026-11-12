@@ -7,7 +7,7 @@ require("modules.blink_reminder").start({
     hotkey = { mods = { "ctrl", "alt", "cmd" }, key = "B", bind = false },
 })
 -- hotkey.bind = false 或省略 hotkey 时只启动定时提醒；.show() 可手动显示。
--- 所有悬浮按钮随机位置和颜色；延后按钮可直接点击，无需悬停。
+-- 所有悬浮按钮随机位置；确认按钮随机颜色，延后按钮仅显示文字，可直接点击。
 ]]
 
 local M = {}
@@ -303,11 +303,22 @@ local function buttonHTML(stage)
 end
 
 local function snoozeHTML(minutes)
-    local color = randomButtonColor()
+    local letters, index = {}, 0
+    local colorOffset = math.random(0, 1) -- 每次随机以黑字或白字开头
+    for _, codepoint in utf8.codes(string.format("延后 %g 分钟", minutes)) do
+        local char = utf8.char(codepoint)
+        if char == " " then
+            letters[#letters + 1] = char
+        else
+            index = index + 1
+            local color = (index + colorOffset) % 2 == 1 and "#000000" or "#FFFFFF"
+            letters[#letters + 1] = string.format('<span style="color:%s;">%s</span>', color, char)
+        end
+    end
     return htmlShell(string.format([[
-<button class="floating" style="background:%s;color:%s;cursor:pointer;" type="button"
-        onclick="send('snooze', %g, %d)">延后 %g 分钟</button>
-]], color.bg, color.fg, minutes, app.buttonSession, minutes))
+<button class="floating" style="background:transparent;border:0;box-shadow:none;cursor:pointer;" type="button"
+        onclick="send('snooze', %g, %d)"><span>%s</span></button>
+]], minutes, app.buttonSession, table.concat(letters)))
 end
 
 local function makeWindow(rect)
