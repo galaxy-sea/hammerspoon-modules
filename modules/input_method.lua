@@ -10,7 +10,7 @@ require("modules.input_method").start({
 -- hs.keycodes.currentSourceID() 查看当前输入法 ID；需要辅助功能权限。
 ]]
 local M = {}
-local watcher, observer, inputTap, focusTimer, config, lastContext
+local watcher, observer, inputTap, config, lastContext
 local log = hs.logger.new("input_method", "warning")
 local function focusedApp()
     -- 优先读取辅助功能焦点，失败时使用前台应用。
@@ -67,14 +67,9 @@ local function chromeFocus(app)
     end)
     if ok then apply(app, address) end
 end
--- 等待 Chrome 完成焦点更新；只在事件发生后检查一次，不轮询。
-local function scheduleChromeFocus()
-    if focusTimer then focusTimer:stop() end
-    focusTimer = hs.timer.doAfter(0.08, function()
-        focusTimer = nil
-        local app = hs.application.frontmostApplication()
-        if app and app:bundleID() == "com.google.Chrome" then chromeFocus(app) end
-    end)
+local function checkChromeFocus()
+    local app = hs.application.frontmostApplication()
+    if app and app:bundleID() == "com.google.Chrome" then chromeFocus(app) end
 end
 local function activated(app)
     stopObserver()
@@ -89,18 +84,16 @@ local function activated(app)
         observer = hs.axuielement.observer.new(app:pid())
         observer:callback(function()
             local front = hs.application.frontmostApplication()
-            if front and front:pid() == app:pid() then scheduleChromeFocus() end
+            if front and front:pid() == app:pid() then checkChromeFocus() end
         end)
         observer:addWatcher(root, "AXFocusedUIElementChanged")
         observer:start()
     end)
     if not ok then stopObserver(); log.w("无法监听 Chrome 地址栏：" .. tostring(err)) end
     chromeFocus(app)
-    scheduleChromeFocus()
 end
 function M.stop()
     if inputTap then inputTap:stop(); inputTap = nil end
-    if focusTimer then focusTimer:stop(); focusTimer = nil end
     stopObserver()
     if watcher then watcher:stop(); watcher = nil end
     lastContext = nil
@@ -127,7 +120,7 @@ function M.start(options)
         if app and app:bundleID() == "com.google.Chrome" then
             local key = event:getKeyCode()
             if event:getType() == types.leftMouseUp or key == 48 or key == 36 or key == 53
-                or (key == 37 and event:getFlags().cmd) then scheduleChromeFocus() end
+                or (key == 37 and event:getFlags().cmd) then checkChromeFocus() end
         end
         return false
     end):start()
