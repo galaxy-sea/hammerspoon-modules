@@ -13,4 +13,5 @@ Hammerspoon 脚本集合，功能及快捷键由 `init.lua` 统一配置。
 | [usb_MTP_finder.lua](modules/usb_MTP_finder.lua) | 发现明确声明 MTP 的 USB 接口(Android设备)时启动用户指定软件（必填 `appBundleID`），无可用设备时退出；重新启动前等待退出完成。 | 监听：USB 插拔及指定软件退出；每次插拔通过 ioreg 检查一次 USB 接口，无快捷键。 |
 | [scheduled_webpages.lua](modules/scheduled_webpages.lua) | 使用 Cron 表达式定时打开网页，支持链接与 Cron 数组，使用系统默认浏览器。 | 定时触发；无快捷键。 |
 | [browser_dispatcher.lua](modules/browser_dispatcher.lua) | 按网址或来源应用分发链接，支持 Chrome、Edge、Safari、Firefox，以及浏览器和 Profile 选择。 | 接管系统 HTTP/HTTPS 链接；无快捷键。 |
+| [input_method.lua](modules/input_method.lua) | 按应用自动切换输入法；Chrome 地址栏聚焦时使用 ABC，离开后恢复应用规则，未匹配时默认使用 Fcitx5 中文。 | 监听：应用激活及 Chrome 辅助功能焦点变化；无定时轮询、无快捷键。 |
 
