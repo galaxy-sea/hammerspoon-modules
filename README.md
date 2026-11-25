@@ -1,17 +1,18 @@
 # .hammerspoon
 
-Hammerspoon 脚本集合，功能及快捷键由 `init.lua` 统一配置。
+一组让 Mac 用起来更顺手的小脚本：自动切换输入法、提醒休息、整理窗口，以及按需打开浏览器和设备管理软件。
 
-| 脚本 | 功能 | 绑定快捷键 / 监听事件 |
+功能和快捷键可以在 [init.lua](init.lua) 中调整，修改后重新加载 Hammerspoon 配置即可。
+
+| 脚本 | 功能 | 使用方式 |
 | --- | --- | --- |
-| [install.sh](install.sh) | 将仓库目录软链接到 `~/.hammerspoon`；已有其他配置时提示并退出，已正确链接时提示已就绪。 | 手动执行：`./install.sh`。 |
-| [init.lua](init.lua) | 配置并启动各模块。 | 加载或重新加载配置。 |
-| [window_resize.lua](modules/window_resize.lua) | 将当前窗口调整为预置或自定义尺寸，并居中显示。 | 绑定：`Ctrl + Cmd + Shift + 5`。 |
-| [lockscreen_camera.lua](modules/lockscreen_camera.lua) | 锁屏唤醒拍照、解锁时补拍及解锁后定时拍摄，分阶段发送邮件，成功后清理照片及日期目录；连接指定 Wi-Fi 时跳过。 | 监听：锁屏、解锁、显示器休眠与唤醒、系统休眠与关机、用户会话离开及 Wi-Fi 变化；无快捷键。 |
-| [close_last_window_hide.lua](modules/close_last_window_hide.lua) | 关闭应用最后一个窗口后自动隐藏应用，不拦截原有关闭操作。 | 监听：`Cmd + W`。 |
-| [blink_reminder.lua](modules/blink_reminder.lua) | 每 20 分钟提醒休息，支持延后及悬停确认关闭。 | 测试快捷键：`Ctrl + Option + Cmd + B`，默认不绑定。 |
-| [usb_MTP_finder.lua](modules/usb_MTP_finder.lua) | 发现明确声明 MTP 的 USB 接口(Android设备)时启动用户指定软件（必填 `appBundleID`），无可用设备时退出；重新启动前等待退出完成。 | 监听：USB 插拔及指定软件退出；每次插拔通过 ioreg 检查一次 USB 接口，无快捷键。 |
-| [scheduled_webpages.lua](modules/scheduled_webpages.lua) | 使用 Cron 表达式定时打开网页，支持链接与 Cron 数组，使用系统默认浏览器。 | 定时触发；无快捷键。 |
-| [browser_dispatcher.lua](modules/browser_dispatcher.lua) | 按网址或来源应用分发链接，支持 Chrome、Edge、Safari、Firefox，以及浏览器和 Profile 选择。 | 接管系统 HTTP/HTTPS 链接；无快捷键。 |
-| [input_method.lua](modules/input_method.lua) | 按应用自动切换输入法；Chrome 地址栏聚焦时使用 ABC，离开后恢复应用规则，未匹配时默认使用 Fcitx5 中文。 | 监听：应用激活及 Chrome 辅助功能焦点变化；无定时轮询、无快捷键。 |
-
+| [install.sh](install.sh) | 将这套脚本设置为 Hammerspoon 配置；已有其他配置时会提示。 | 执行 `./install.sh`。 |
+| [init.lua](init.lua) | 集中设置需要启用的功能和快捷键。 | 加载配置后自动启动。 |
+| [window_resize.lua](modules/window_resize.lua) | 将当前窗口调整到指定大小，并居中显示。 | `Ctrl + Cmd + Shift + 5`。 |
+| [lockscreen_camera.lua](modules/lockscreen_camera.lua) | 锁屏唤醒、解锁及解锁后拍照并发送邮件，发送成功后清理照片；可设置在指定 Wi-Fi 下跳过。 | 自动运行。 |
+| [close_last_window_hide.lua](modules/close_last_window_hide.lua) | 关闭应用最后一个窗口后，自动隐藏应用。 | 按 `Cmd + W` 关闭窗口时生效。 |
+| [blink_reminder.lua](modules/blink_reminder.lua) | 定时提醒眼睛休息，可选择延后；按钮随机出现，悬停并确认后关闭。提醒间隔、延后时间和确认次数均可调整。 | 自动提醒；测试快捷键 `Ctrl + Option + Cmd + B` 默认关闭。 |
+| [usb_MTP_finder.lua](modules/usb_MTP_finder.lua) | 连接可识别的 MTP 文件传输设备时，自动打开你指定的软件；断开后自动退出。 | 插拔 USB 设备时生效。 |
+| [scheduled_webpages.lua](modules/scheduled_webpages.lua) | 按指定时间自动打开一个或多个网页。 | 到时间后使用默认浏览器打开。 |
+| [browser_dispatcher.lua](modules/browser_dispatcher.lua) | 根据网址或打开链接的软件，选择浏览器及用户配置，也可以每次弹窗选择。支持 Chrome、Edge、Safari 和 Firefox。 | 点击外部链接时生效。 |
+| [input_method.lua](modules/input_method.lua) | 切换应用时自动选择输入法；Chrome 地址栏使用英文，离开地址栏后恢复默认输入法。 | 自动切换，无需快捷键。 |
