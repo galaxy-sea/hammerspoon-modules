@@ -1,13 +1,12 @@
 --[[
 require("modules.input_method").start({
-    trace = true, -- 调试结束后设为 false
     defaultSource = "org.fcitx.inputmethod.Fcitx5.zhHans",
     apps = {
         ["com.apple.Spotlight"] = "com.apple.keylayout.ABC",
         ["com.apple.Terminal"] = "com.apple.keylayout.ABC",
     },
     chromeAddressSource = "com.apple.keylayout.ABC", -- Chrome 地址栏获得焦点时使用英文
-    vscodePanelSource = "com.apple.keylayout.ABC", -- VS Code 整个 Panel 区域使用英文
+    vscodeConsolePanelSource = "com.apple.keylayout.ABC", -- VS Code 控制台面板输入法
     vscodeChatSource = "org.fcitx.inputmethod.Fcitx5.zhHans", -- VS Code ChatGPT/Codex 聊天输入框
 })
 -- hs.keycodes.currentSourceID() 查看当前输入法 ID；需要辅助功能权限。
@@ -16,33 +15,21 @@ local M = {}
 local watcher, observer, retryTimer, refreshTimer, config, lastContext
 local generation = 0
 local log = hs.logger.new("input_method", "warning")
-local trace, traceID = nil, 0
-local function beginTrace(app, trigger)
-    if not config or not config.trace then trace = nil; return end
-    traceID = traceID + 1
-    trace = { id = traceID, started = hs.timer.absoluteTime(), attrs = {} }
-    hs.printf("input_method #%d app=%s pid=%s event=%s", trace.id,
-        app and ((app:name() or "") .. " [" .. (app:bundleID() or "unknown") .. "]") or "unknown", app and tostring(app:pid()) or "?", trigger)
-end
-local function detail(format, ...)
-    if trace then hs.printf("input_method #%d " .. format, trace.id, ...) end
-end
+local attributeCache
+local NIL = {}
 local function attribute(element, key)
-    if not trace then return element:attributeValue(key) end
-    local started = hs.timer.absoluteTime()
-    local value = element:attributeValue(key)
-    local item = trace.attrs[key] or { count = 0, ms = 0 }
-    item.count, item.ms = item.count + 1, item.ms + (hs.timer.absoluteTime() - started) / 1e6
-    trace.attrs[key] = item
-    return value
-end
-local function finishTrace()
-    if not trace then return end
-    for key, item in pairs(trace.attrs) do
-        detail("AX %s calls=%d elapsed=%.3fms", key, item.count, item.ms)
+    local cached = attributeCache and attributeCache[element]
+    if cached and cached[key] ~= nil then
+        if cached[key] == NIL then return nil end
+        return cached[key]
     end
-    detail("total=%.3fms (从回调开始，不含系统派发事件前的等待)", (hs.timer.absoluteTime() - trace.started) / 1e6)
-    trace = nil
+    local value = element:attributeValue(key)
+    if attributeCache then
+        cached = cached or {}
+        attributeCache[element] = cached
+        cached[key] = value == nil and NIL or value
+    end
+    return value
 end
 local function focusedApp()
     -- 优先读取辅助功能焦点，失败时使用前台应用。
@@ -55,10 +42,7 @@ end
 local function isVSCode(id)
     return id == "com.microsoft.VSCode" or id == "com.microsoft.VSCodeInsiders"
 end
-local function apply(app, addressBar)
-    local id = app:bundleID()
-    local context = tostring(app:pid()) .. ":" .. (addressBar == "chat" and "chat" or (addressBar and "special" or "app"))
-    if context == lastContext then detail("skip=context_unchanged"); return end -- 同一页面允许用户手动切换，不持续抢回输入法。
+local function appSource(id)
     local source = config.apps[id]
     if not source and id then
         local longest = 0
@@ -72,24 +56,26 @@ local function apply(app, addressBar)
         end
     end
     source = source or config.defaultSource
-    if id == "com.google.Chrome" then
-        source = addressBar and config.chromeAddressSource or config.defaultSource
-    elseif isVSCode(id) and addressBar then
-        source = addressBar == "chat" and config.vscodeChatSource or config.vscodePanelSource
+    return source
+end
+local function apply(app, addressBar)
+    local id = app:bundleID()
+    local context = tostring(app:pid()) .. ":" .. (addressBar == "chat" and "chat" or (addressBar and "special" or "app"))
+    if context == lastContext then return end -- 同一页面允许用户手动切换，不持续抢回输入法。
+    local source = appSource(id)
+    local rules = config.childRules[id] or {}
+    if addressBar then
+        local kind = addressBar == "chat" and "chat" or (isVSCode(id) and "panel" or "address")
+        source = rules[kind] or source
     end
-    local started = hs.timer.absoluteTime()
     local current = hs.keycodes.currentSourceID()
-    detail("rule state=%s current=%s target=%s source_read=%.3fms", tostring(addressBar), tostring(current), tostring(source), (hs.timer.absoluteTime() - started) / 1e6)
     if source and current ~= source then
-        started = hs.timer.absoluteTime()
         local switched = hs.keycodes.currentSourceID(source)
-        detail("switch_call=%.3fms result=%s (不代表输入法界面已经完成切换)", (hs.timer.absoluteTime() - started) / 1e6, tostring(switched))
         if not switched then
             log.w("无法切换输入法：" .. source)
             return
         end
     end
-    if current == source then detail("skip=already_target") end
     lastContext = context
 end
 local function stopObserver()
@@ -106,7 +92,7 @@ local function isAddressBar(element)
         local role = attribute(element, "AXRole")
         if role == "AXWebArea" then return false end
         if role == "AXTextField" or role == "AXComboBox" or role == "AXTextArea" then
-            for _, key in ipairs({ "AXIdentifier", "AXDescription", "AXTitle", "AXHelp", "AXPlaceholderValue" }) do
+            for _, key in ipairs({ "AXDescription", "AXTitle", "AXIdentifier", "AXHelp", "AXPlaceholderValue" }) do
                 local value = attribute(element, key)
                 local text = type(value) == "string" and value:lower() or ""
                 if text:find("omnibox", 1, true) or text:find("address and search", 1, true)
@@ -131,6 +117,9 @@ local function isVSCodePanel(element)
                 if class == "part" then hasPart = true end
                 if class == "panel" then hasPanel = true end
                 if class == "composite" then hasComposite = true end
+                if class == "editor-group-container" or class == "auxiliarybar" or class == "sidebar" then
+                    return false
+                end
             end
             if hasPanel and (hasPart or hasComposite) then return true end
         end
@@ -171,8 +160,10 @@ local function activated(app)
     app = app or focusedApp()
     if not app then return end
     local vscode = isVSCode(app:bundleID())
-    beginTrace(app, "application_activated")
-    if app:bundleID() ~= "com.google.Chrome" and not vscode then apply(app); finishTrace(); return end
+    local childRules = config.childRules[app:bundleID()]
+    if not childRules or next(childRules) == nil then
+        apply(app); return
+    end
     local currentGeneration = generation
     local watched, root = {}, nil
     local function isCurrent()
@@ -198,52 +189,48 @@ local function activated(app)
         if count > 0 then watched[#watched + 1] = element end
         return count > 0
     end
-    refresh = function(trigger)
+    refresh = function(trigger, eventElement)
         if not isCurrent() then return end
-        beginTrace(app, trigger or "initial_focus")
-        local stageStart = hs.timer.absoluteTime()
+        attributeCache = {}
         local ok, ready = pcall(function()
             root = root or hs.axuielement.applicationElementForPID(app:pid())
             if not root then return false end
             if not observer then
                 pcall(function() root:setAttributeValue("AXManualAccessibility", true) end)
             end
-            stageStart = hs.timer.absoluteTime()
-            local element = attribute(root, "AXFocusedUIElement")
-            detail("focused_element_read=%.3fms found=%s", (hs.timer.absoluteTime() - stageStart) / 1e6, tostring(element ~= nil))
-            stageStart = hs.timer.absoluteTime()
+            local element
+            if trigger == "AXFocusedUIElementChanged" and eventElement then
+                local valid, focused = pcall(function() return attribute(eventElement, "AXFocused") end)
+                if valid and focused == true then element = eventElement end
+            end
+            element = element or attribute(root, "AXFocusedUIElement")
             if not element then return false end
             local special
             if vscode then
-                if isVSCodePanel(element) then special = true
-                elseif isChatInput(element) then special = "chat"
+                -- 已知聊天输入框先快速识别，避免先扫描整个 Panel 祖先链。
+                if isChatInput(element) then special = "chat"
+                elseif childRules.panel and isVSCodePanel(element) then special = true
                 else special = false end
             else
                 special = isAddressBar(element)
             end
-            detail("classification=%.3fms state=%s", (hs.timer.absoluteTime() - stageStart) / 1e6, special == "chat" and "VSCode_chat" or (special and (vscode and "VSCode_panel" or "Chrome_address") or "default_area"))
             local transient = false
             if vscode and special == false then
                 local role = attribute(element, "AXRole")
                 transient = role ~= "AXTextArea" and role ~= "AXTextField" and role ~= "AXComboBox"
             end
-            if transient then
-                -- 标签、按钮及临时容器不代表用户已进入另一个输入区域。
-                detail("skip=non_input_focus_keep_current")
-            else
-                apply(app, special)
-            end
+            -- 标签、按钮及临时容器不代表用户已进入另一个输入区域。
+            if not transient then apply(app, special) end
             if not observer or trigger == nil or trigger == "AXWindowCreated"
                 or trigger == "AXFocusedWindowChanged" or trigger == "AX_retry_after_1s" then
-                stageStart = hs.timer.absoluteTime()
             if not observer then
                 observer = hs.axuielement.observer.new(app:pid())
-                observer:callback(function(_, _, notification)
+                observer:callback(function(_, eventElement, notification)
                     if not isCurrent() then return end
                     if notification == "AXFocusedUIElementChanged" or notification == "AXSelectedChildrenChanged" then
                         lastContext = nil
                     end
-                    refresh(notification)
+                    refresh(notification, eventElement)
                     -- 仅窗口/标签变化补查一次，焦点事件不重复读取。
                     if notification ~= "AXFocusedUIElementChanged" then
                         if refreshTimer then refreshTimer:stop() end
@@ -261,13 +248,11 @@ local function activated(app)
                 if window then watch(window) end
             end
             observer:start()
-            detail("observer_maintenance_after_switch=%.3fms watchers=%d", (hs.timer.absoluteTime() - stageStart) / 1e6, #watched)
                 if not registered then return false end
             end
             return true
         end)
-        detail("refresh ready=%s error=%s", tostring(ok and ready == true), ok and "none" or tostring(ready))
-        finishTrace()
+        attributeCache = nil
         if ok and ready then
             if retryTimer then retryTimer:stop(); retryTimer = nil end
         else
@@ -275,7 +260,6 @@ local function activated(app)
             retry()
         end
     end
-    finishTrace()
     refresh() -- 立即建立监听并检查，无固定延迟。
 end
 function M.stop()
@@ -290,16 +274,28 @@ function M.start(options)
     config = {
         defaultSource = options.defaultSource or "org.fcitx.inputmethod.Fcitx5.zhHans",
         chromeAddressSource = options.chromeAddressSource or "com.apple.keylayout.ABC",
-        vscodePanelSource = options.vscodePanelSource or "com.apple.keylayout.ABC",
+        vscodeConsolePanelSource = options.vscodeConsolePanelSource or "com.apple.keylayout.ABC",
         vscodeChatSource = options.vscodeChatSource or options.defaultSource or "org.fcitx.inputmethod.Fcitx5.zhHans",
-        trace = options.trace == true, -- 临时诊断耗时，不记录输入内容
         apps = options.apps or {},
     }
     assert(type(config.defaultSource) == "string", "defaultSource 必须为 Source ID")
     assert(type(config.chromeAddressSource) == "string", "chromeAddressSource 必须为 Source ID")
-    assert(type(config.vscodePanelSource) == "string", "vscodePanelSource 必须为 Source ID")
+    assert(type(config.vscodeConsolePanelSource) == "string", "vscodeConsolePanelSource 必须为 Source ID")
     assert(type(config.vscodeChatSource) == "string", "vscodeChatSource 必须为 Source ID")
     for _, source in pairs(config.apps) do assert(type(source) == "string", "应用规则需要 Source ID") end
+    -- 仅保留与父级输入法不同的子规则，不修改用户传入的配置。
+    config.childRules = {}
+    for _, id in ipairs({ "com.google.Chrome", "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders" }) do
+        local parent = appSource(id)
+        local rules = {}
+        if id == "com.google.Chrome" then
+            if config.chromeAddressSource ~= parent then rules.address = config.chromeAddressSource end
+        else
+            if config.vscodeConsolePanelSource ~= parent then rules.panel = config.vscodeConsolePanelSource end
+            if config.vscodeChatSource ~= parent then rules.chat = config.vscodeChatSource end
+        end
+        config.childRules[id] = rules
+    end
     watcher = hs.application.watcher.new(function(_, event)
         if event == hs.application.watcher.activated then
             -- 以当前前台应用为准；不让迟到的 deactivated 事件拆掉新监听。

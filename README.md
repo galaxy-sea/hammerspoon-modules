@@ -15,4 +15,4 @@
 | [usb_MTP_finder.lua](modules/usb_MTP_finder.lua) | 连接可识别的 MTP 文件传输设备时，自动打开你指定的软件；断开后自动退出。 | 插拔 USB 设备时生效。 |
 | [scheduled_webpages.lua](modules/scheduled_webpages.lua) | 按指定时间自动打开一个或多个网页。 | 到时间后使用默认浏览器打开。 |
 | [browser_dispatcher.lua](modules/browser_dispatcher.lua) | 根据网址或打开链接的软件，选择浏览器及用户配置，也可以每次弹窗选择。支持 Chrome、Edge、Safari 和 Firefox。 | 点击外部链接时生效。 |
-| [input_method.lua](modules/input_method.lua) | 切换应用时自动选择输入法；VS Code ChatGPT/Codex 聊天输入框使用中文，Chrome 地址栏和 VS Code 底部面板（终端、问题、输出、调试控制台等）使用英文，离开后恢复对应的默认输入法。 | 自动切换，无需快捷键。 |
+| [input_method.lua](modules/input_method.lua) | 根据应用和输入区域自动切换输入法。 | 自动切换，无需快捷键。 |
