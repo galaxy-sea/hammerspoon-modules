@@ -86,4 +86,5 @@ require("modules.input_method").start({
         ["com.jetbrains.*"] = "com.apple.keylayout.ABC", -- JetBrains 全系列，* 为 Bundle ID 前缀匹配
     },
     chromeAddressSource = "com.apple.keylayout.ABC",
+    vscodeTerminalSource = "com.apple.keylayout.ABC",
 })

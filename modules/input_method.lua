@@ -6,6 +6,7 @@ require("modules.input_method").start({
         ["com.apple.Terminal"] = "com.apple.keylayout.ABC",
     },
     chromeAddressSource = "com.apple.keylayout.ABC", -- Chrome 地址栏获得焦点时使用英文
+    vscodeTerminalSource = "com.apple.keylayout.ABC", -- VS Code 集成终端获得焦点时使用英文
 })
 -- hs.keycodes.currentSourceID() 查看当前输入法 ID；需要辅助功能权限。
 ]]
@@ -20,6 +21,9 @@ local function focusedApp()
         return element and hs.application.applicationForPID(element:pid())
     end)
     return (ok and app) or hs.application.frontmostApplication()
+end
+local function isVSCode(id)
+    return id == "com.microsoft.VSCode" or id == "com.microsoft.VSCodeInsiders"
 end
 local function apply(app, addressBar)
     local id = app:bundleID()
@@ -40,6 +44,8 @@ local function apply(app, addressBar)
     source = source or config.defaultSource
     if id == "com.google.Chrome" then
         source = addressBar and config.chromeAddressSource or config.defaultSource
+    elseif isVSCode(id) and addressBar then
+        source = config.vscodeTerminalSource
     end
     if source and hs.keycodes.currentSourceID() ~= source then
         if not hs.keycodes.currentSourceID(source) then
@@ -76,12 +82,32 @@ local function isAddressBar(element)
     end
     return false
 end
+-- 只匹配终端输入控件，不根据窗口标题或整个终端面板判断。
+local function isTerminalInput(element)
+    local role = element:attributeValue("AXRole")
+    if role ~= "AXTextArea" and role ~= "AXTextField" then return false end
+    local classes = element:attributeValue("AXDOMClassList")
+    if type(classes) == "table" then
+        for _, class in ipairs(classes) do
+            if class == "xterm-helper-textarea" then return true end
+        end
+    end
+    for _, key in ipairs({ "AXIdentifier", "AXDescription", "AXTitle", "AXHelp" }) do
+        local value = element:attributeValue(key)
+        local text = type(value) == "string" and value:lower() or ""
+        if text:find("xterm-helper-textarea", 1, true)
+            or text:find("terminal input", 1, true) or text:find("终端输入", 1, true)
+            or text:find("終端機輸入", 1, true) then return true end
+    end
+    return false
+end
 local function activated(app)
     stopObserver()
     lastContext = nil
     app = app or focusedApp()
     if not app then return end
-    if app:bundleID() ~= "com.google.Chrome" then apply(app); return end
+    local vscode = isVSCode(app:bundleID())
+    if app:bundleID() ~= "com.google.Chrome" and not vscode then apply(app); return end
     local currentGeneration = generation
     local watched, root = {}, nil
     local function isCurrent()
@@ -134,13 +160,15 @@ local function activated(app)
             observer:start()
             local element = root:attributeValue("AXFocusedUIElement")
             if not element or not registered then return false end
-            apply(app, isAddressBar(element))
+            local special
+            if vscode then special = isTerminalInput(element) else special = isAddressBar(element) end
+            apply(app, special)
             return true
         end)
         if ok and ready then
             if retryTimer then retryTimer:stop(); retryTimer = nil end
         else
-            if not ok then log.w("Chrome 焦点读取/监听失败：" .. tostring(ready)) end
+            if not ok then log.w("焦点读取/监听失败：" .. tostring(ready)) end
             retry()
         end
     end
@@ -159,10 +187,12 @@ function M.start(options)
     config = {
         defaultSource = options.defaultSource or "org.fcitx.inputmethod.Fcitx5.zhHans",
         chromeAddressSource = options.chromeAddressSource or "com.apple.keylayout.ABC",
+        vscodeTerminalSource = options.vscodeTerminalSource or "com.apple.keylayout.ABC",
         apps = options.apps or {},
     }
     assert(type(config.defaultSource) == "string", "defaultSource 必须为 Source ID")
     assert(type(config.chromeAddressSource) == "string", "chromeAddressSource 必须为 Source ID")
+    assert(type(config.vscodeTerminalSource) == "string", "vscodeTerminalSource 必须为 Source ID")
     for _, source in pairs(config.apps) do assert(type(source) == "string", "应用规则需要 Source ID") end
     watcher = hs.application.watcher.new(function(_, event)
         if event == hs.application.watcher.activated then
