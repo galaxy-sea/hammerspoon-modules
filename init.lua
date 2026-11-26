@@ -77,14 +77,16 @@ require("modules.browser_dispatcher").start({
 hs.alert.show("Hammerspoon 配置已加载")
 
 require("modules.input_method").start({
+    trace = true, -- 输出输入法切换阶段耗时，调试后改为 false
     defaultSource = "org.fcitx.inputmethod.Fcitx5.zhHans",
     apps = {
         ["com.apple.Spotlight"] = "com.apple.keylayout.ABC",
         ["com.apple.Terminal"] = "com.apple.keylayout.ABC",
         -- ["com.microsoft.VSCode"] = "com.apple.keylayout.ABC",
-        -- ["com.microsoft.VSCodeInsiders"] = "com.apple.keylayout.ABC",
+        ["com.microsoft.VSCodeInsiders"] = "com.apple.keylayout.ABC",
         ["com.jetbrains.*"] = "com.apple.keylayout.ABC", -- JetBrains 全系列，* 为 Bundle ID 前缀匹配
     },
     chromeAddressSource = "com.apple.keylayout.ABC",
-    vscodeTerminalSource = "com.apple.keylayout.ABC",
+    vscodePanelSource = "com.apple.keylayout.ABC",
+    vscodeChatSource = "org.fcitx.inputmethod.Fcitx5.zhHans",
 })
