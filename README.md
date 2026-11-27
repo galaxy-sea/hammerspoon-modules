@@ -27,11 +27,12 @@
 
 | 功能 | 对应脚本 | 同类软件 | 脚本提供的功能 |
 | --- | --- | --- | --- |
-| 自动切换输入法 | [input_assistant.lua](modules/input_assistant.lua) | 自动切换输入法专业版（Better365）、TypeRelay Pro、[Input Source Pro](https://github.com/runjuu/InputSourcePro)、KeyboardHolder | 按应用和指定输入区域切换输入法，按软件使用英文标点。 |
-| 浏览器智能分流 | [browser_dispatcher.lua](modules/browser_dispatcher.lua) | OpenIn、[Choosy](https://choosy.app/)、[Finicky](https://github.com/johnste/finicky)、[Velja](https://sindresorhus.com/velja) | 根据网址或来源应用选择浏览器及用户配置，也可弹窗选择。 |
-| 窗口管理 | [window_resize.lua](modules/window_resize.lua) | Wins、Magnet、[Moom](https://manytricks.com/moom/)、[Rectangle](https://rectangleapp.com/)、Loop | 通过快捷键调整窗口大小并居中。 |
-| 应用窗口自动隐藏 | [close_last_window_hide.lua](modules/close_last_window_hide.lua) | Quitter 类工具、Swift Quit（自动退出）及综合效率工具 | 关闭最后一个窗口后自动隐藏应用；隐藏后应用继续运行。 |
-| 护眼休息提醒 | [blink_reminder.lua](modules/blink_reminder.lua) | Eye Monitor、一休、[LookAway](https://lookaway.com/)、[Stretchly](https://github.com/hovancik/stretchly)、Time Out | 定时提醒休息，支持延后提醒和自定义间隔。 |
+| 自动切换输入法 | [input_assistant.lua](modules/input_assistant.lua) | [自动切换输入法专业版（Better365）](https://www.better365.cn/AutoSwitchInput.html)、[TypeRelay Pro](https://apps.apple.com/cn/app/typerelay-%E8%BE%93%E5%85%A5%E6%B3%95%E8%87%AA%E5%8A%A8%E5%88%87%E6%8D%A2/id6773039331)、[Input Source Pro](https://github.com/runjuu/InputSourcePro)、[KeyboardHolder](https://keyboardholder.leavesc.com/) | 按应用和指定输入区域切换输入法，按软件使用英文标点。 |
+| 浏览器智能分流 | [browser_dispatcher.lua](modules/browser_dispatcher.lua) | [OpenIn](https://loshadki.app/openin4/)、[Choosy](https://choosy.app/)、[Finicky](https://github.com/johnste/finicky)、[Velja](https://sindresorhus.com/velja) | 根据网址或来源应用选择浏览器及用户配置，也可弹窗选择。 |
+| 窗口管理 | [window_resize.lua](modules/window_resize.lua) | [Wins](https://wins.cool/)、[Magnet](https://magnet.crowdcafe.com/)、[Moom](https://manytricks.com/moom/)、[Rectangle](https://rectangleapp.com/)、[Loop](https://github.com/MrKai77/Loop) | 通过快捷键调整窗口大小并居中。 |
+| 应用窗口自动隐藏 | [close_last_window_hide.lua](modules/close_last_window_hide.lua) | [Quitter](https://marco.org/apps#quitter)、[Swift Quit](https://github.com/onebadidea/swiftquit)（自动退出） | 关闭最后一个窗口后自动隐藏应用；隐藏后应用继续运行。 |
+| 护眼休息提醒 | [blink_reminder.lua](modules/blink_reminder.lua) | [Eye Monitor](https://eyemonitor.app/)、[一休](https://www.mxl.app/)、[LookAway](https://lookaway.com/)、[Stretchly](https://github.com/hovancik/stretchly)、[Time Out](https://www.dejal.com/timeout/) | 定时提醒休息，支持延后提醒和自定义间隔。 |
+| 解锁拍照与安全提醒 | [lockscreen_camera.lua](modules/lockscreen_camera.lua) | [Do Not Disturb](https://github.com/objective-see/DoNotDisturb)、[Unplug Alarm](https://protectmacbook.com/)、[Failshot](https://failshot.app/)、[Upsi](https://getupsi.com/) | 锁屏唤醒、解锁及解锁后拍照并发送邮件，可在指定 Wi-Fi 下跳过。 |
 | 定时打开网页 | [scheduled_webpages.lua](modules/scheduled_webpages.lua) | [Tab Scheduler](https://chromewebstore.google.com/detail/tab-scheduler-with-auto-o/dhpkakcoddfplipjgbhklfgomilbecnj)、[Tab Snooze](https://chromewebstore.google.com/detail/tab-snooze/kgnigbfnfjgpfaiaafcbgdkpalapiinb)（Chrome 插件） | 按计划自动打开网页，例如每个工作日上午打开工作页面。 |
 
 > 不知道怎么改？直接上 AI 一梭子，或者在 Issues 中提出你的需求。
