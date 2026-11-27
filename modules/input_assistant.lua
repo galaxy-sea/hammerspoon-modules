@@ -30,7 +30,8 @@ local log = hs.logger.new("input_assistant", "warning")
 local punctuationTap, punctuationSymbols
 local appRules
 local punctuationKeys = {
-    [50] = { "`", "~" }, [27] = { "-", "_" }, [24] = { "=", "+" },
+    -- 不拦截未按 Shift 的 - 和 =，保留输入法候选翻页；_ 和 + 仍转换。
+    [50] = { "`", "~" }, [27] = { nil, "_" }, [24] = { nil, "+" },
     [33] = { "[", "{" }, [30] = { "]", "}" }, [42] = { "\\", "|" },
     [41] = { ";", ":" }, [39] = { "'", '"' }, [43] = { ",", "<" },
     [47] = { ".", ">" }, [44] = { "/", "?" },
