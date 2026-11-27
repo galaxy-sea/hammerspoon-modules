@@ -9,7 +9,7 @@ require("modules.usb_MTP_finder").start({
     queryTimeout = 10,
 })
 ]]
--- 启动时及 USB 插拔后各查询一次 USB 接口；无常驻监听进程、无自动重查。
+-- 启动时及 USB 插拔后各查询一次 USB 接口；无常驻监听进程；未发现接口时延迟复查后再退出。
 local M = {}
 local defaults = {
     disconnectDelay = 1,
@@ -19,14 +19,16 @@ local cfg, usbWatcher, appWatcher, queryTask, timeoutTimer, actionTimer
 local previousShutdown, shutdownHook
 local running, available, devices, lastError = false, nil, {}, nil
 local revision, checkPending = 0, false
-local quitRequested = {} -- PID -> 应用实例；一直保留到进程完全退出。
+local quitRequested = {} -- 已请求退出的 PID；不保留可能失效的应用对象。
 local restartPending = false
+local confirmingMissing = false
 local log = hs.logger.new("usb_MTP_finder", "info")
 local query, requestCheck
 
 local function stopTimer(timer) if timer then timer:stop() end end
 local function short(text) return tostring(text or ""):sub(1, 2000) end
 local function queryFailed(reason)
+    confirmingMissing = false
     available, devices, lastError = nil, {}, reason
     stopTimer(actionTimer); actionTimer = nil
     log.e(short(reason)) -- 查询失败不等于没有设备，不据此关闭应用。
@@ -56,8 +58,10 @@ local function reconcile()
     end
     if available then
         local exiting = false
-        for pid, app in pairs(quitRequested) do
-            if app:isRunning() then exiting = true
+        local live = {}
+        for _, app in ipairs(apps) do live[app:pid()] = true end
+        for pid in pairs(quitRequested) do
+            if live[pid] then exiting = true
             else quitRequested[pid] = nil end
         end
         if exiting then
@@ -77,7 +81,7 @@ local function reconcile()
         for _, app in ipairs(apps) do
             local pid = app:pid()
             if pid and not quitRequested[pid] then
-                quitRequested[pid] = app
+                quitRequested[pid] = true
                 log.i("请求 " .. cfg.appName .. " 正常退出，等待应用自行清理；PID=" .. pid)
                 app:kill()
             end
@@ -91,8 +95,11 @@ local function snapshot(output)
     local nextDevices, seen = {}, {}
     for _, interface in ipairs(interfaces) do
         -- 仅接口明确声明 MTP 时命中；不把同为 6/1/1 的 PTP 相机误判为 MTP。
-        local name = interface["USB Interface Name"] or interface.kUSBString or interface.IORegistryEntryName or ""
-        if tostring(name):upper():find("MTP", 1, true) then
+        local mtp = false
+        for _, key in ipairs({ "USB Interface Name", "kUSBString", "IORegistryEntryName" }) do
+            if tostring(interface[key] or ""):upper():find("MTP", 1, true) then mtp = true end
+        end
+        if mtp then
             local id = tostring(interface.locationID or interface.IORegistryEntryID or "")
             if id ~= "" and not seen[id] then
                 seen[id] = true
@@ -108,7 +115,20 @@ local function snapshot(output)
     end
     stopTimer(actionTimer)
     local currentRevision = revision
-    actionTimer = hs.timer.doAfter(available and 0 or cfg.disconnectDelay, safe(function()
+    if not available and not confirmingMissing then
+        -- 首次缺失只安排复查，不依据旧快照退出应用。
+        confirmingMissing = true
+        actionTimer = hs.timer.doAfter(cfg.disconnectDelay, safe(function()
+            actionTimer = nil
+            if running and revision == currentRevision then
+                checkPending = true
+                query()
+            end
+        end))
+        return
+    end
+    confirmingMissing = false
+    actionTimer = hs.timer.doAfter(0, safe(function()
         actionTimer = nil
         if revision == currentRevision then reconcile() end
     end))
@@ -153,6 +173,7 @@ end
 requestCheck = function(reason)
     if not running then return end
     revision = revision + 1
+    confirmingMissing = false
     available = nil -- 不使用 USB 变化前的设备状态启动或关闭应用。
     checkPending = true
     stopTimer(actionTimer); actionTimer = nil
@@ -175,6 +196,7 @@ function M.start(options)
     end
     assert(type(cfg.queryTimeout) == "number" and cfg.queryTimeout > 0, "queryTimeout 必须 > 0")
     assert(type(cfg.disconnectDelay) == "number" and cfg.disconnectDelay >= 0, "disconnectDelay 必须 >= 0")
+    confirmingMissing = false
     running, available, devices, lastError = true, nil, {}, nil
     quitRequested, checkPending, restartPending = {}, false, false
     usbWatcher = hs.usb.watcher.new(safe(function(event)
@@ -205,6 +227,7 @@ end
 
 function M.stop()
     if not running then return end
+    confirmingMissing = false
     running, available, devices = false, nil, {}
     revision = revision + 1
     checkPending, restartPending = false, false
