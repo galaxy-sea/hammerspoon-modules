@@ -128,6 +128,7 @@ local PRESET_RULES = {
 
 local targetWinId = nil
 local chooser = nil
+local resizeHotkey
 
 ------------------------------------------------------------
 -- 创建 choices
@@ -245,6 +246,7 @@ end
 ------------------------------------------------------------
 
 function M.start(options)
+    M.stop()
     local hotkey = options and options.hotkey
 
     --------------------------------------------------------
@@ -339,16 +341,21 @@ function M.start(options)
     --------------------------------------------------------
 
     if hotkey and hotkey.bind ~= false then
-        hs.hotkey.bind(
+        resizeHotkey = hs.hotkey.bind(
             hotkey.mods,
             hotkey.key,
             showResizeChooser
         )
     end
 
-    print(
-        "[WindowResize] started"
-    )
+    return M
+end
+
+function M.stop()
+    if resizeHotkey then resizeHotkey:delete(); resizeHotkey = nil end
+    if chooser then chooser:hide(); chooser:delete(); chooser = nil end
+    targetWinId = nil
+    return M
 end
 
 return M

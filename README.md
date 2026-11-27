@@ -5,12 +5,16 @@
 一个轻量级的脚本集合，让你的 Mac 少一些后台负担，发挥本应拥有的性能。小工具就应该短小精悍。
 
 ## 功能列表
-功能和快捷键可以在 [init.lua](init.lua) 中调整，修改后重新加载 Hammerspoon 配置即可。
+默认配置可在 [config.lua](config.lua) 中调整。GUI 是可选的，启用后可通过菜单栏「脚本 → 打开设置…」管理开关和配置；在 [init.lua](init.lua) 中注释 GUI 的 `.start({ modules = scripts })` 一行即可不加载 GUI，其他脚本和已保存的设置照常生效。每个功能脚本均可单独 `require(...).start(...)` 使用，不依赖 GUI 或其他功能脚本。
+
+可以在 `init.lua` 中使用 `scripts.register("脚本名", { 配置 })` 手动注册（放在 GUI 加载之前），或在 GUI 中点击「注册脚本」，填写 `modules` 目录中的脚本名。GUI 注册会保存到本机，重载后仍生效。每个脚本独立运行，GUI 仅负责管理；自定义脚本提供 `start(options)` 和 `stop()` 即可接入。
 
 | 脚本 | 功能 | 使用方式 |
 | --- | --- | --- |
 | [install.sh](install.sh) | 将这套脚本设置为 Hammerspoon 配置；已有其他配置时会提示。 | 执行 `./install.sh`。 |
-| [init.lua](init.lua) | 集中设置需要启用的功能和快捷键。 | 加载配置后自动启动。 |
+| [init.lua](init.lua) | 启动各脚本，可选加载 GUI。 | 加载配置后自动启动。 |
+| [config.lua](config.lua) | 各脚本的默认开关和配置。 | GUI 中可恢复默认设置。 |
+| [script_manager.lua](modules/script_manager.lua) | 注册并独立启动脚本，可选开启 GUI 管理开关和配置。 | 菜单栏「脚本 → 打开设置…」。 |
 | [dev_tools.lua](modules/dev_tools.lua) | 开发辅助工具，可拖动浮窗显示应用和输入法信息，支持复制 ID、清空日志和重载配置。 | 自动更新，无需快捷键。 |
 | [window_resize.lua](modules/window_resize.lua) | 将当前窗口调整到指定大小，并居中显示。 | `Ctrl + Cmd + Shift + 5`。 |
 | [lockscreen_camera.lua](modules/lockscreen_camera.lua) | 锁屏唤醒、解锁及解锁后拍照并发送邮件，发送成功后清理照片；可设置在指定 Wi-Fi 下跳过。 | 自动运行。 |

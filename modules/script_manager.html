@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小脚本设置</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f6f8;--card:#fff;--ink:#202734;--muted:#737e8d;--line:#e6e9ee;--accent:#226c51;--soft:#e5f1eb;--danger:#ae3941}
+@media(prefers-color-scheme:dark){:root{--bg:#181c21;--card:#222830;--ink:#e9edf2;--muted:#a5aebb;--line:#353d47;--accent:#7ac6a7;--soft:#263e35;--danger:#ff9299}}
+*{box-sizing:border-box}body{margin:0;font:13px -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;background:var(--bg);color:var(--ink)}button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:7px;padding:7px 11px}button:hover{border-color:var(--accent)}button:disabled{opacity:.45;cursor:default}button.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}input,select{border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);padding:7px;min-width:0}input:focus,select:focus{outline:2px solid var(--soft);border-color:var(--accent)}input[type=checkbox]{accent-color:var(--accent);width:17px;height:17px;cursor:pointer}.layout{display:flex;height:100vh;padding-top:32px}aside{width:230px;flex-shrink:0;border-right:1px solid var(--line);padding:24px 12px;overflow:auto}h1{font-size:19px;letter-spacing:-.5px;margin:0 10px 6px}.caption{color:var(--muted);font-size:12px;margin:0 10px 24px}.nav{width:100%;text-align:left;display:flex;align-items:center;gap:10px;border:0;background:none;padding:12px;margin:3px 0}.nav.selected{background:var(--soft)}.dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex-shrink:0}.dot.on{background:var(--accent)}.dot.error{background:var(--danger)}main{flex:1;min-width:0;display:flex;flex-direction:column}.scroll{overflow:auto;padding:28px 30px;flex:1}header{display:flex;align-items:center;justify-content:space-between;gap:16px}h2{font-size:23px;margin:0 0 8px;letter-spacing:-.5px}.description{color:var(--muted);line-height:1.6;margin:0 0 22px}.switch{white-space:nowrap;display:flex;align-items:center;gap:8px}.status{color:var(--muted);font-size:12px;margin:8px 0 20px}.errorbox{color:var(--danger);white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}.group{background:var(--card);border:1px solid var(--line);border-radius:9px;margin:10px 0;padding:0 12px 10px}.group summary{cursor:pointer;font-weight:600;padding:12px 0}.row{display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}.label{width:155px;flex-shrink:0;overflow-wrap:anywhere;line-height:1.5}.row input:not([type=checkbox]){flex:1;width:0}.row select{max-width:115px}.remove{padding:4px 8px;color:var(--muted);background:none;border:0}.remove:hover{color:var(--danger)}.add{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding-top:10px}.add input{flex:1;width:120px}.small{font-size:11px;color:var(--muted)}.nested{min-width:0}.nested>.group{background:transparent}.group-heading{display:flex;gap:8px;align-items:center;justify-content:space-between}.group-heading span{overflow-wrap:anywhere}.empty{color:var(--muted);padding:10px 0;font-size:12px}footer{padding:14px 28px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;background:var(--card)}#notice{flex:1;color:var(--muted);font-size:12px;overflow-wrap:anywhere}#notice.bad{color:var(--danger)}.footer-actions{display:flex;gap:8px}.welcome{padding:40px;color:var(--muted)}
+@media(max-width:780px){aside{width:170px}.scroll{padding:20px 16px}.label{width:115px}footer{padding:12px 16px;flex-wrap:wrap}.row{flex-wrap:wrap}}
+</style>
+<div class="layout">
+<aside><h1>小脚本设置</h1><p class="caption">按需开启，轻装运行。</p><button id="register" type="button">＋ 注册脚本</button><nav id="navigation"></nav></aside>
+<main><div class="scroll" id="content"><p class="welcome">正在读取配置…</p></div><footer><span id="notice">设置仅保存在这台 Mac 上。</span><div class="footer-actions"><button id="reset" disabled>恢复默认</button><button class="primary" id="save" disabled>保存并应用</button></div></footer></main>
+</div>
+<script>
+'use strict';
+let modules=[], selected=null, drafts={}, dirty={}, busy=false, registering=false;
+let registrationDraft={id:'',title:'',description:'',enabled:true,options:{}};
+const names={hotkey:'快捷键',mods:'组合键',key:'按键',bind:'启用快捷键',intervalMinutes:'提醒间隔（分钟）',snoozeMinutes:'延后时间（分钟）',hoverSeconds:'悬停时间（秒）',hoverCount:'确认次数',appBundleID:'应用 Bundle ID',appName:'应用显示名称',disconnectDelay:'断开确认等待（秒）',queryTimeout:'设备查询超时（秒）',schedules:'网页计划',url:'网址',cron:'时间规则（分 时 日 月 星期）',browsers:'浏览器列表（首项为默认）',profiles:'用户配置（首项为默认）',rules:'分流规则',urls:'网址匹配',patterns:'高级匹配模式',apps:'来源应用',browser:'浏览器',profile:'用户配置',logLevel:'日志级别',defaultSource:'默认输入法 ID',englishPunctuation:'使用英文标点的应用',appInputSources:'应用输入法分组',focusInputSources:'输入区域分组',chromeAddress:'Chrome 地址栏',vscodeConsolePanel:'VS Code 控制台面板',vscodeChat:'VS Code 聊天输入框',account:'邮件账户',from:'发件地址',fromName:'发件人名称',to:'收件地址',ignoredSSIDs:'跳过拍照的 Wi-Fi',lockedInterval:'锁屏拍照间隔（秒）',afterUnlockCount:'解锁后拍照次数',afterUnlockInterval:'解锁后拍照间隔（秒）',width:'浮窗宽度',margin:'浮窗右侧边距'};
+const templates={schedules:{url:'https://example.com',cron:'0 9 * * 1-5'},rules:{urls:'example.com',browser:'chrome',profile:'choose'}};
+const labels={string:'文字',number:'数字',boolean:'开关',array:'列表',object:'分组'};
+const make=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e};
+const clone=value=>JSON.parse(JSON.stringify(value));
+const entry=()=>modules.find(item=>item.id===selected);
+function notice(message,bad=false){const e=document.getElementById('notice');e.textContent=message;e.className=bad?'bad':''}
+function mark(){dirty[selected]=true;document.getElementById('save').disabled=busy;notice('有未保存的修改。')}
+function send(body){window.webkit.messageHandlers.scriptManager.postMessage(body)}
+function kindOf(value){return Array.isArray(value)?'array':(value!==null&&typeof value==='object'?'object':typeof value)}
+function initial(kind){return{string:'',number:0,boolean:false,array:[],object:{}}[kind]}
+function safeKey(key){return key&&!['__proto__','constructor','prototype'].includes(key)}
+function normalize(value,key){
+  const objectKeys=new Set(['options','hotkey','appInputSources','focusInputSources']);
+  if(Array.isArray(value)&&value.length===0&&objectKeys.has(key))return {};
+  if(value&&typeof value==='object')for(const k of Object.keys(value))value[k]=normalize(value[k],k);
+  return value;
+}
+function renderNavigation(){
+ const nav=document.getElementById('navigation');nav.replaceChildren();
+ for(const item of modules){const b=make('button','nav'+(selected===item.id?' selected':''));b.type='button';const dot=make('span','dot'+(item.error?' error':item.running?' on':''));b.append(dot,make('span','',item.title));b.onclick=()=>{if(busy)return;registering=false;selected=item.id;renderNavigation();renderEditor()};nav.append(b)}
+}
+function typePicker(value,onChange){const picker=make('select');picker.setAttribute('aria-label','值类型');for(const [type,label]of Object.entries(labels)){const option=make('option','',label);option.value=type;picker.append(option)}picker.value=kindOf(value);picker.onchange=()=>onChange(initial(picker.value));return picker}
+function renderValue(parent,key,value,set,remove,path){
+ const title=typeof key==='number'?'第 '+(key+1)+' 项':names[key]||key;
+ const kind=kindOf(value);
+ const erase=make('button','remove','删除');erase.type='button';erase.onclick=()=>{remove();mark();renderEditor()};
+ if(kind==='array'||kind==='object'){
+  const details=make('details','group');details.open=path.length<3;
+  const summary=make('summary');summary.textContent=title;details.append(summary);
+  const body=make('div','nested');details.append(body);renderCollection(body,value,path,set);
+  const bottom=make('div','add');bottom.append(erase);details.append(bottom);parent.append(details);return;
+ }
+ const row=make('div','row');const label=make('label','label',title);row.append(label);
+ const input=make('input');input.type=kind==='boolean'?'checkbox':kind==='number'?'number':'text';input.spellcheck=false;
+ if(kind==='boolean')input.checked=value;else input.value=value;
+ label.htmlFor=input.id='field-'+Math.random().toString(36).slice(2);
+ if(kind==='number')input.step='any';
+ input.oninput=()=>{if(kind==='number'&&(!input.value.trim()||!Number.isFinite(Number(input.value)))){input.setCustomValidity('请输入有效数字');return}input.setCustomValidity('');set(kind==='boolean'?input.checked:kind==='number'?Number(input.value):input.value);mark()};
+ row.append(input,typePicker(value,v=>{set(v);mark();renderEditor()}),erase);parent.append(row);
+}
+function renderCollection(parent,value,path,set){
+ const array=Array.isArray(value);const keys=Object.keys(value);
+ if(!keys.length)parent.append(make('div','empty',array?'列表为空，点击下方添加。':'暂无设置，可添加需要的配置项。'));
+ for(const key of keys){const index=array?Number(key):key;renderValue(parent,index,value[key],v=>value[key]=v,()=>{if(array)value.splice(index,1);else delete value[key]},[...path,key])}
+ const add=make('div','add');let keyInput;
+ if(!array){keyInput=make('input');keyInput.placeholder=['appInputSources','focusInputSources'].includes(path.at(-1))?'输入法 ID':'设置名称';keyInput.setAttribute('aria-label','新设置名称');add.append(keyInput)}
+ const picker=typePicker('',()=>{});picker.value=(path.at(-1)==='appInputSources'||path.at(-1)==='focusInputSources')?'array':(array&&value.length?kindOf(value[0]):'string');
+ if(array&&templates[path.at(-1)])picker.value='object';
+ const button=make('button','',array?'＋ 添加一项':'＋ 添加设置');button.type='button';
+ button.onclick=()=>{const key=array?value.length:keyInput.value.trim();if(!array&&(!safeKey(key)||Object.hasOwn(value,key))){notice('请输入不重复的有效设置名称。',true);return}
+ let v=initial(picker.value);if(array&&templates[path.at(-1)]&&picker.value==='object')v=clone(templates[path.at(-1)]);
+ value[key]=v;set(value);mark();renderEditor()};
+ add.append(picker,button);parent.append(add);
+}
+function renderEditor(){
+ const item=registering?{title:'注册脚本',description:'填写 modules 目录中的脚本文件名（不含 .lua），设置配置并选择是否启用。'}:entry();
+ const content=document.getElementById('content');content.replaceChildren();if(!item)return;
+ if(!registering&&!drafts[selected])drafts[selected]={enabled:item.enabled,options:normalize(clone(item.options),'options')};
+ const draft=registering?registrationDraft:drafts[selected];const header=make('header');header.append(make('h2','',item.title));
+ const label=make('label','switch');const toggle=make('input');toggle.type='checkbox';toggle.checked=draft.enabled;toggle.onchange=()=>{draft.enabled=toggle.checked;mark()};label.append(toggle,make('span','','启用脚本'));header.append(label);content.append(header,make('p','description',item.description));
+ if(!registering)content.append(make('p','status',item.error?'上次应用失败':item.running?'正在运行':'已关闭'));
+ if(item.error)content.append(make('p','errorbox',item.error));
+ const form=make('form');form.id='settings-form';form.onsubmit=e=>e.preventDefault();
+ if(registering)for(const [key,title]of [['id','脚本文件名'],['title','显示名称'],['description','说明']]){
+   const row=make('div','row');const label=make('label','label',title);const input=make('input');input.type='text';input.value=draft[key];input.spellcheck=false;
+   if(key==='id'){input.required=true;input.pattern='[A-Za-z0-9_]+';input.placeholder='例如 my_script';}
+   input.oninput=()=>{draft[key]=input.value;mark()};row.append(label,input);form.append(row);
+ }
+ renderCollection(form,draft.options,[],v=>draft.options=v);content.append(form);
+ document.getElementById('reset').disabled=busy||registering;document.getElementById('save').disabled=busy;
+ document.getElementById('save').textContent=registering?'注册并应用':'保存并应用';
+ if(!busy)notice(dirty[selected]?'有未保存的修改。':'修改后点击「保存并应用」，只更新当前脚本。');
+}
+window.receiveState=payload=>{
+ modules=payload.modules;busy=false;
+ if(payload.savedID){delete drafts[payload.savedID];delete dirty[payload.savedID];if(registering&&payload.savedID===registrationDraft.id.trim()){registering=false;selected=payload.savedID;registrationDraft={id:'',title:'',description:'',enabled:true,options:{}};}}
+ if(!registering&&(!selected||!modules.some(item=>item.id===selected)))selected=modules[0]?.id;
+ renderNavigation();renderEditor();if(payload.message)notice(payload.message,!payload.success);
+};
+document.getElementById('save').onclick=()=>{
+ if(busy||!selected)return;const form=document.getElementById('settings-form');if(!form.reportValidity())return;
+ busy=true;document.getElementById('save').disabled=true;document.getElementById('reset').disabled=true;notice('正在应用…');
+ if(registering){const value={...registrationDraft,id:registrationDraft.id.trim()};if(!value.title.trim())value.title=value.id;send({action:'register',...value});}
+ else send({action:'save',id:selected,...drafts[selected]});
+};
+document.getElementById('register').onclick=()=>{if(busy)return;registering=true;selected='__new';renderNavigation();renderEditor();notice('脚本需提供 start(options) 和 stop()，注册后仍独立运行。');};
+document.getElementById('reset').onclick=()=>{
+ const item=entry();drafts[selected]={enabled:item.defaults.enabled,options:normalize(clone(item.defaults.options),'options')};mark();renderEditor();notice('已填入默认设置，保存后生效。');
+};
+send({action:'ready'});
+</script>
+</html>
