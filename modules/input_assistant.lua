@@ -1,20 +1,96 @@
 --[[
-require("modules.input_method").start({
+require("modules.input_assistant").start({
     defaultSource = "org.fcitx.inputmethod.Fcitx5.zhHans",
-    apps = {
-        ["com.apple.Spotlight"] = "com.apple.keylayout.ABC",
-        ["com.apple.Terminal"] = "com.apple.keylayout.ABC",
+    englishPunctuation = { -- 仅对列出的应用转换英文标点，支持 * 前缀匹配
+        "com.microsoft.VSCode",
+        "com.jetbrains.*",
     },
-    chromeAddressSource = "com.apple.keylayout.ABC", -- Chrome 地址栏获得焦点时使用英文
-    vscodeConsolePanelSource = "com.apple.keylayout.ABC", -- VS Code 控制台面板输入法
-    vscodeChatSource = "org.fcitx.inputmethod.Fcitx5.zhHans", -- VS Code ChatGPT/Codex 聊天输入框
+    appInputSources = { -- 按输入法分组，列出使用它的应用
+        ["com.apple.keylayout.ABC"] = {
+            "com.apple.Spotlight",
+            "com.apple.Terminal",
+        },
+    },
+    focusInputSources = { -- 按输入法分组，列出使用它的输入区域
+        ["com.apple.keylayout.ABC"] = {
+            "chromeAddress", -- Chrome 地址栏
+            "vscodeConsolePanel", -- VS Code 控制台面板
+        },
+        ["org.fcitx.inputmethod.Fcitx5.zhHans"] = {
+            "vscodeChat", -- VS Code ChatGPT/Codex 聊天输入框
+        },
+    },
 })
 -- hs.keycodes.currentSourceID() 查看当前输入法 ID；需要辅助功能权限。
 ]]
 local M = {}
 local watcher, observer, retryTimer, refreshTimer, config, lastContext
 local generation = 0
-local log = hs.logger.new("input_method", "warning")
+local log = hs.logger.new("input_assistant", "warning")
+local punctuationTap, punctuationSymbols
+local appRules
+local punctuationKeys = {
+    [50] = { "`", "~" }, [27] = { "-", "_" }, [24] = { "=", "+" },
+    [33] = { "[", "{" }, [30] = { "]", "}" }, [42] = { "\\", "|" },
+    [41] = { ";", ":" }, [39] = { "'", '"' }, [43] = { ",", "<" },
+    [47] = { ".", ">" }, [44] = { "/", "?" },
+    [18] = { nil, "!" }, [19] = { nil, "@" }, [20] = { nil, "#" },
+    [21] = { nil, "$" }, [23] = { nil, "%" }, [22] = { nil, "^" },
+    [26] = { nil, "&" }, [28] = { nil, "*" }, [25] = { nil, "(" }, [29] = { nil, ")" },
+}
+local function enabledForApp()
+    local app = hs.application.frontmostApplication()
+    if not app then return false end
+    local id = app:bundleID() or ""
+    for _, bundle in ipairs(appRules) do
+        if bundle == id then return true end
+        if bundle:sub(-1) == "*" then
+            local prefix = bundle:sub(1, -2)
+            if id:sub(1, #prefix) == prefix then return true end
+        end
+    end
+    return false
+end
+-- 仅在应用切换时更新；按软件决定是否转换，无需查询输入法或定时轮询。
+local function updatePunctuation()
+    if not punctuationTap then return end
+    if enabledForApp() then
+        punctuationTap:start()
+    else
+        punctuationTap:stop()
+    end
+end
+local function startPunctuation(options)
+    if options == false then return end
+    options = options or {}
+    assert(type(options) == "table", "englishPunctuation 必须为 Bundle ID 数组")
+    appRules = {}
+    for index, bundle in pairs(options) do
+        if index ~= "symbols" then
+        assert(type(index) == "number" and index >= 1 and index % 1 == 0
+            and index <= #options and type(bundle) == "string" and bundle ~= "",
+            "englishPunctuation 必须为 Bundle ID 数组")
+        appRules[index] = bundle
+        end
+    end
+    punctuationSymbols = options.symbols
+    assert(punctuationSymbols == nil or type(punctuationSymbols) == "string", "symbols 必须为字符串")
+    local injecting = false
+    punctuationTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(event)
+        if injecting then return false end
+        local flags = event:getFlags()
+        if flags.cmd or flags.ctrl or flags.alt or flags.fn then return false end
+        local pair = punctuationKeys[event:getKeyCode()]
+        local symbol = pair and pair[flags.shift and 2 or 1]
+        if not symbol or (punctuationSymbols and not punctuationSymbols:find(symbol, 1, true)) then return false end
+        injecting = true
+        local ok, err = pcall(hs.eventtap.keyStrokes, symbol)
+        injecting = false
+        if not ok then log.w("英文标点输入失败：" .. tostring(err)); return false end
+        return true
+    end)
+    updatePunctuation()
+end
 local attributeCache
 local NIL = {}
 local function attribute(element, key)
@@ -43,10 +119,10 @@ local function isVSCode(id)
     return id == "com.microsoft.VSCode" or id == "com.microsoft.VSCodeInsiders"
 end
 local function appSource(id)
-    local source = config.apps[id]
+    local source = config.appInputSources[id]
     if not source and id then
         local longest = 0
-        for bundle, candidate in pairs(config.apps) do
+        for bundle, candidate in pairs(config.appInputSources) do
             if bundle:sub(-1) == "*" then
                 local prefix = bundle:sub(1, -2)
                 if #prefix > longest and id:sub(1, #prefix) == prefix then
@@ -155,6 +231,7 @@ local function isChatInput(element)
     return false
 end
 local function activated(app)
+    updatePunctuation()
     stopObserver()
     lastContext = nil
     app = app or focusedApp()
@@ -263,39 +340,64 @@ local function activated(app)
     refresh() -- 立即建立监听并检查，无固定延迟。
 end
 function M.stop()
+    if punctuationTap then punctuationTap:stop(); punctuationTap = nil end
     stopObserver()
     if watcher then watcher:stop(); watcher = nil end
     lastContext = nil
     return M
 end
+-- 启动时把按输入法分组的配置展开，事件处理仍直接查表。
+local function expandSources(groups, name, allowed)
+    assert(groups == nil or type(groups) == "table", name .. " 必须按输入法 ID 分组")
+    local result = {}
+    for source, targets in pairs(groups or {}) do
+        assert(type(source) == "string" and source ~= "" and type(targets) == "table",
+            name .. " 需要输入法 ID 和目标数组")
+        for index, target in pairs(targets) do
+            assert(type(index) == "number" and index >= 1 and index % 1 == 0 and index <= #targets
+                and type(target) == "string" and target ~= "", name .. " 的每组必须为目标数组")
+            assert(not allowed or allowed[target], "未知输入区域：" .. target)
+            assert(not result[target], name .. " 重复配置：" .. target)
+            result[target] = source
+        end
+    end
+    return result
+end
 function M.start(options)
     M.stop()
     options = options or {}
+    local focusSources = expandSources(options.focusInputSources, "focusInputSources", {
+        chromeAddress = true, vscodeConsolePanel = true, vscodeChat = true,
+    })
+    local appSources = expandSources(options.appInputSources, "appInputSources")
     config = {
         defaultSource = options.defaultSource or "org.fcitx.inputmethod.Fcitx5.zhHans",
-        chromeAddressSource = options.chromeAddressSource or "com.apple.keylayout.ABC",
-        vscodeConsolePanelSource = options.vscodeConsolePanelSource or "com.apple.keylayout.ABC",
-        vscodeChatSource = options.vscodeChatSource or options.defaultSource or "org.fcitx.inputmethod.Fcitx5.zhHans",
-        apps = options.apps or {},
+        appInputSources = appSources,
+        focusInputSources = {
+            chromeAddress = focusSources.chromeAddress or "com.apple.keylayout.ABC",
+            vscodeConsolePanel = focusSources.vscodeConsolePanel or "com.apple.keylayout.ABC",
+            vscodeChat = focusSources.vscodeChat or options.defaultSource or "org.fcitx.inputmethod.Fcitx5.zhHans",
+        },
     }
     assert(type(config.defaultSource) == "string", "defaultSource 必须为 Source ID")
-    assert(type(config.chromeAddressSource) == "string", "chromeAddressSource 必须为 Source ID")
-    assert(type(config.vscodeConsolePanelSource) == "string", "vscodeConsolePanelSource 必须为 Source ID")
-    assert(type(config.vscodeChatSource) == "string", "vscodeChatSource 必须为 Source ID")
-    for _, source in pairs(config.apps) do assert(type(source) == "string", "应用规则需要 Source ID") end
+    for name, source in pairs(config.focusInputSources) do
+        assert(type(source) == "string", "focusInputSources." .. name .. " 必须为 Source ID")
+    end
+    for _, source in pairs(config.appInputSources) do assert(type(source) == "string", "应用规则需要 Source ID") end
     -- 仅保留与父级输入法不同的子规则，不修改用户传入的配置。
     config.childRules = {}
     for _, id in ipairs({ "com.google.Chrome", "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders" }) do
         local parent = appSource(id)
         local rules = {}
         if id == "com.google.Chrome" then
-            if config.chromeAddressSource ~= parent then rules.address = config.chromeAddressSource end
+            if config.focusInputSources.chromeAddress ~= parent then rules.address = config.focusInputSources.chromeAddress end
         else
-            if config.vscodeConsolePanelSource ~= parent then rules.panel = config.vscodeConsolePanelSource end
-            if config.vscodeChatSource ~= parent then rules.chat = config.vscodeChatSource end
+            if config.focusInputSources.vscodeConsolePanel ~= parent then rules.panel = config.focusInputSources.vscodeConsolePanel end
+            if config.focusInputSources.vscodeChat ~= parent then rules.chat = config.focusInputSources.vscodeChat end
         end
         config.childRules[id] = rules
     end
+    startPunctuation(options.englishPunctuation)
     watcher = hs.application.watcher.new(function(_, event)
         if event == hs.application.watcher.activated then
             -- 以当前前台应用为准；不让迟到的 deactivated 事件拆掉新监听。

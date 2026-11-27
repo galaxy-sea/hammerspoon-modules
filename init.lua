@@ -2,6 +2,11 @@
 -- Hammerspoon init.lua
 ------------------------------------------------------------
 
+-- 开发辅助工具：常驻浮窗显示前台应用、Bundle ID 和当前输入法。
+-- require("modules.dev_tools").start()
+
+
+
 -- 快捷键统一在这里配置，由各模块负责绑定或监听。
 -- hotkey.mods 使用 ctrl / alt（Option）/ cmd / shift。
 -- hotkey.bind = false 跳过绑定或监听；true 或省略时启用。
@@ -74,18 +79,34 @@ require("modules.browser_dispatcher").start({
 })
 
 
-hs.alert.show("Hammerspoon 配置已加载")
-
-require("modules.input_method").start({
+require("modules.input_assistant").start({
     defaultSource = "org.fcitx.inputmethod.Fcitx5.zhHans",
-    apps = {
-        ["com.apple.Spotlight"] = "com.apple.keylayout.ABC",
-        ["com.apple.Terminal"] = "com.apple.keylayout.ABC",
-        -- ["com.microsoft.VSCode"] = "com.apple.keylayout.ABC",
-        ["com.microsoft.VSCodeInsiders"] = "com.apple.keylayout.ABC",
-        ["com.jetbrains.*"] = "com.apple.keylayout.ABC", -- JetBrains 全系列，* 为 Bundle ID 前缀匹配
+    englishPunctuation = { -- 列出的应用转换英文标点，支持 * 前缀匹配
+        "com.microsoft.VSCode",
+        "com.jetbrains.*",
+        "com.apple.Terminal",
     },
-    chromeAddressSource = "com.apple.keylayout.ABC",
-    vscodeConsolePanelSource = "com.apple.keylayout.ABC", -- VS Code 控制台面板输入法
-    vscodeChatSource = "org.fcitx.inputmethod.Fcitx5.zhHans",
+    appInputSources = { -- 按照应用切换到对应的输入法，Bundle ID 支持 * 前缀匹配
+        ["com.apple.keylayout.ABC"] = {
+            "com.apple.Spotlight",
+            "com.apple.Terminal",
+            -- "com.microsoft.VSCode",
+            "com.microsoft.VSCodeInsiders",
+            "com.jetbrains.*", -- * 为 Bundle ID 前缀匹配
+        },
+    },
+    focusInputSources = { -- 按照应用窗口切换输入法，不需要就直接注释了，无法自由配置
+        ["com.apple.keylayout.ABC"] = {
+            "chromeAddress", -- Chrome 地址栏
+            "vscodeConsolePanel", -- VS Code 控制台面板
+        },
+        ["org.fcitx.inputmethod.Fcitx5.zhHans"] = {
+            "vscodeChat", -- VS Code ChatGPT/Codex 聊天输入框
+        },
+    },
 })
+
+
+
+
+hs.alert.show("Hammerspoon 配置已加载")
