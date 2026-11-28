@@ -15,6 +15,21 @@ local defaults = {
     disconnectDelay = 1,
     queryTimeout = 10,
 }
+M.parameters = {
+    {
+        label = "文件传输软件",
+        fields = {
+            { key = "appBundleID", label = "选择软件", default = "", options = "application" },
+            { key = "disconnectDelay", label = "断开确认等待（秒）", default = defaults.disconnectDelay },
+        },
+    },
+    {
+        label = "高级设置", collapsed = true,
+        fields = {
+            { key = "queryTimeout", label = "设备查询超时（秒）", default = defaults.queryTimeout },
+        },
+    },
+}
 local cfg, usbWatcher, appWatcher, queryTask, timeoutTimer, actionTimer
 local previousShutdown, shutdownHook
 local running, available, devices, lastError = false, nil, {}, nil

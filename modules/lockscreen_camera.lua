@@ -1,16 +1,46 @@
 -- 单张 ImageSnap + 单调时钟；邮件与摄像头各自独立，所有报告先落盘再发送。
 local M = {}
+local IMAGESNAP = "/opt/homebrew/bin/imagesnap"
+local MSMTP = "/opt/homebrew/bin/msmtp"
+local STATE_ROOT = hs.configdir .. "/.lockscreen_camera"
+-- 安装依赖：brew install imagesnap msmtp
+M.installation = {
+    command = [[# 先替换邮箱、SMTP 授权码和收件地址，再整体执行一次。
+(
+  set -e
+
+  # 1. 安装依赖
+  brew install imagesnap msmtp
+
+  # 2. 追加 demo 账户配置
+  umask 077
+  cat >> "$HOME/.msmtprc" <<'EOF'
+
+account demo
+host smtp.qq.com
+port 465
+auth on
+tls on
+tls_starttls off
+from your@qq.com
+user your@qq.com
+password YOUR_SMTP_AUTH_CODE
+EOF
+  chmod 600 "$HOME/.msmtprc"
+
+  # 3. 发送测试邮件
+  printf 'To: recipient@example.com\nSubject: Hammerspoon mail test\n\nMail configuration works.\n' | msmtp -a demo -t
+)
+# 收信成功后，GUI 中的邮件账户填写 demo，收件地址填写实际接收邮箱。]],
+}
+
 local home = os.getenv("HOME")
 local defaults = {
-    imagesnap = "/opt/homebrew/bin/imagesnap",
-    msmtp = "/opt/homebrew/bin/msmtp",
     account = "default",
-    from = "", -- 在 init.lua 设置；不在这里保存 SMTP 密码。
-    fromName = "", -- 收件人看到的发件人显示名；不用于 SMTP 登录或信封地址。
+    deviceName = "", -- 留空使用系统设备名称，同时用作邮件标题前缀。
     to = {},
     ignoredSSIDs = {}, -- 连接到这些 Wi-Fi 时，不拍摄、不发信。
     photoRoot = home .. "/Downloads/异常解锁",
-    stateRoot = hs.configdir .. "/.lockscreen_camera",
     lockedInterval = 5,
     afterUnlockInterval = 30,
     afterUnlockCount = 10,
@@ -21,7 +51,44 @@ local defaults = {
     maxMailBytes = 10 * 1024 * 1024, -- 包括 Base64 和 MIME 开销。
     retryInitial = 30,
     retryMax = 3600,
-    device = nil, -- nil：系统默认摄像头；否则传给 imagesnap -d。
+}
+-- 仅描述现有配置；GUI 根据默认值推断控件，脚本本身不依赖 GUI。
+M.parameters = {
+    {
+        label = "邮件通知",
+        fields = {
+            { key = "account", label = "邮件账户", default = defaults.account },
+            { key = "deviceName", label = "设备名称（邮件标题前缀）", default = defaults.deviceName },
+            { key = "to", label = "收件地址", default = defaults.to },
+        },
+    },
+    {
+        label = "拍照安排",
+        fields = {
+            { key = "photoRoot", label = "照片保存目录", default = defaults.photoRoot },
+            { key = "lockedInterval", label = "锁屏拍照间隔（秒）", default = defaults.lockedInterval },
+            { key = "afterUnlockCount", label = "解锁后拍照次数", default = defaults.afterUnlockCount },
+            { key = "afterUnlockInterval", label = "解锁后拍照间隔（秒）", default = defaults.afterUnlockInterval },
+        },
+    },
+    {
+        label = "跳过的 Wi-Fi",
+        fields = {
+            { key = "ignoredSSIDs", label = "不拍照和发信的 Wi-Fi", default = defaults.ignoredSSIDs },
+        },
+    },
+    {
+        label = "高级设置", collapsed = true,
+        fields = {
+            { key = "warmup", label = "摄像头预热（秒）", default = defaults.warmup },
+            { key = "cameraTimeout", label = "拍照超时（秒）", default = defaults.cameraTimeout },
+            { key = "mailTimeout", label = "发信超时（秒）", default = defaults.mailTimeout },
+            { key = "maxLockedSeconds", label = "锁屏拍照时长上限（秒，0 不限）", default = defaults.maxLockedSeconds },
+            { key = "maxMailBytes", label = "单封邮件大小上限（字节）", default = defaults.maxMailBytes },
+            { key = "retryInitial", label = "发信首次重试等待（秒）", default = defaults.retryInitial },
+            { key = "retryMax", label = "发信重试等待上限（秒）", default = defaults.retryMax },
+        },
+    },
 }
 local cfg, watcher, wifiWatcher, previousShutdown, shutdownHook
 local ignoredSSIDSet, currentSSID, wifiIgnored = {}, nil, false
@@ -44,7 +111,7 @@ local function short(s) return tostring(s or ""):sub(1, 3000) end
 local function note(level, message)
     log[level](message)
     if cfg then
-        local f = io.open(cfg.stateRoot .. "/camera.log", "a")
+        local f = io.open(STATE_ROOT .. "/camera.log", "a")
         if f then f:write(os.date("%Y-%m-%d %H:%M:%S "), level, " ", message, "\n"); f:close() end
     end
 end
@@ -57,7 +124,7 @@ local function mkdir(path)
 end
 
 local function save(r)
-    local path = cfg.stateRoot .. "/reports/" .. r.id .. ".json"
+    local path = STATE_ROOT .. "/reports/" .. r.id .. ".json"
     local f = assert(io.open(path .. ".tmp", "wb"))
     local ok, err = f:write(hs.json.encode(r, true))
     local closed, closeError = f:close()
@@ -248,16 +315,14 @@ local function message(r)
     local part = r.nextPart
     local boundary = "lockscreen_" .. r.id .. "_" .. part
     local kind = r.kind == "locked" and (r.unlockedText and "锁屏及解锁时照片" or "锁屏期间照片") or "解锁后照片"
-    local subject = cfg.fromName .. " - 锁屏异常唤醒"
+    local subject = cfg.deviceName .. " - 锁屏异常唤醒"
     local body = string.format("设备：%s\n阶段：%s\n开始：%s\n结束：%s\n原因：%s\n照片总数：%d\n本机目录：%s\n",
         cfg.deviceName, kind, r.startedText, r.endedText, short(r.reason), #r.photos, r.dir)
-    local sender = cfg.from
-    if cfg.fromName ~= "" then sender = header(cfg.fromName) .. " <" .. cfg.from .. ">" end
     local messageID = string.format("<%s.%d@lockscreen-camera.local>", r.id, part)
     -- 兼容旧队列；重试保持原 Message-ID，新邮件则通过引用归入同一会话。
     local threadRoot = r.threadRoot or string.format("<%s.1@lockscreen-camera.local>", r.id)
     local out = {
-        "From: " .. sender, "To: " .. table.concat(cfg.to, ", "),
+        "To: " .. table.concat(cfg.to, ", "), -- From 邮件头由 msmtp 根据账户补充。
         "Subject: " .. header(subject),
         "Date: " .. os.date("!%a, %d %b %Y %H:%M:%S +0000"),
         "Message-ID: " .. messageID,
@@ -318,10 +383,10 @@ pumpMail = function()
     end
     local r = selected
     local ok, data = pcall(function()
-        assert(cfg.from ~= "" and #cfg.to > 0, "未设置 from / to")
+        assert(#cfg.to > 0, "未设置收件地址 to")
         if not r.parts then plan(r); save(r) end
         local data = message(r)
-        local path = cfg.stateRoot .. "/outgoing.eml"
+        local path = STATE_ROOT .. "/outgoing.eml"
         local f = assert(io.open(path, "wb"))
         local written, why = f:write(data)
         local closed, closeError = f:close()
@@ -347,11 +412,11 @@ pumpMail = function()
             if r.status == "sent" then cleanupSentPhotos() end
         else mailFailed(r, "msmtp exit=" .. code .. " " .. short(stderr)) end
         mailTimer = hs.timer.doAfter(0.1, safe(pumpMail))
-    end), { "-c", 'exec "$1" --account="$2" --timeout=30 --read-recipients --from="$3" < "$4"',
-        "lockscreen-camera-mail", cfg.msmtp, cfg.account, cfg.from, data })
+    end), { "-c", 'exec "$1" --account="$2" --read-recipients < "$3"',
+        "lockscreen-camera-mail", MSMTP, cfg.account, data })
     mailTask = task
     if not task or not task:start() then
-        mailTask = nil; mailFailed(r, "msmtp 无法启动：" .. cfg.msmtp)
+        mailTask = nil; mailFailed(r, "msmtp 无法启动：" .. MSMTP)
         mailTimer = hs.timer.doAfter(0.1, safe(pumpMail)); return
     end
     mailTimeout = hs.timer.doAfter(cfg.mailTimeout, safe(function()
@@ -436,7 +501,7 @@ checkWiFi = function()
         finish("连接到跳过名单中的 Wi-Fi：" .. ssid .. "；保留本机照片，不发送本阶段通知", true)
         stopTimer(mailTimer); stopTimer(mailTimeout); mailTimer, mailTimeout = nil, nil
         local task = mailTask; mailTask = nil; killTask(task)
-        if task then os.remove(cfg.stateRoot .. "/outgoing.eml") end
+        if task then os.remove(STATE_ROOT .. "/outgoing.eml") end
     elseif wasIgnored and running then
         -- 无论由 Wi-Fi 通知还是系统事件先发现离网，都恢复已排队的邮件。
         wakeHandled = false
@@ -475,10 +540,9 @@ capture = function(s)
         started = wall(), monotonicStart = monotonic() }
     save(r) -- 先记录目标文件，崩溃恢复也能找回已写完但未回调的照片。
     local args = { "-q", "-w", tostring(cfg.warmup) }
-    if cfg.device then args[#args + 1] = "-d"; args[#args + 1] = cfg.device end
     args[#args + 1] = r.pending.path
     local task
-    task = hs.task.new(cfg.imagesnap, safe(function(code, _, stderr)
+    task = hs.task.new(IMAGESNAP, safe(function(code, _, stderr)
         if session ~= s or camera ~= task then return end
         if checkWiFi() then return end
         camera = nil; stopTimer(s.timeout); s.timeout = nil; r.cameraPID = nil
@@ -499,7 +563,7 @@ capture = function(s)
     end), args)
     camera = task
     if not task or not task:start() then
-        camera = nil; finish("ImageSnap 无法启动：" .. cfg.imagesnap); return
+        camera = nil; finish("ImageSnap 无法启动：" .. IMAGESNAP); return
     end
     r.cameraPID = task:pid(); save(r)
     s.timeout = hs.timer.doAfter(cfg.cameraTimeout, safe(function()
@@ -590,10 +654,10 @@ local function event(eventType)
 end
 
 local function recover()
-    for file in hs.fs.dir(cfg.stateRoot .. "/reports") do
+    for file in hs.fs.dir(STATE_ROOT .. "/reports") do
         if file:match("%.json$") then
             local ok, err = pcall(function()
-                local r = readJSON(cfg.stateRoot .. "/reports/" .. file)
+                local r = readJSON(STATE_ROOT .. "/reports/" .. file)
                 if r.status == "active" then
                     -- 仅清理命令行含本轮唯一临时文件名的旧进程，避免 PID 复用误杀。
                     if r.cameraPID and r.pending then
@@ -619,8 +683,17 @@ function M.start(options)
     if running then return M end
     cfg = {}
     for k, v in pairs(defaults) do cfg[k] = v end
-    for k, v in pairs(options or {}) do assert(defaults[k] ~= nil or k == "device" or k == "deviceName", "未知配置：" .. k); cfg[k] = v end
-    cfg.deviceName = cfg.deviceName or hs.host.localizedName() or "Mac"
+    -- 兼容旧配置中的已移除字段；固定数据目录、程序路径，并使用默认摄像头。
+    local retired = { from = true, fromName = true, imagesnap = true, msmtp = true, stateRoot = true, device = true }
+    for k, v in pairs(options or {}) do
+        if not retired[k] then
+            assert(defaults[k] ~= nil, "未知配置：" .. k)
+            cfg[k] = v
+        end
+    end
+    local name = options and options.deviceName
+    if name == nil then name = options and options.fromName end -- 兼容旧版设备显示名称。
+    cfg.deviceName = (type(name) == "string" and name ~= "" and name) or hs.host.localizedName() or "Mac"
     assert(type(cfg.ignoredSSIDs) == "table", "ignoredSSIDs 必须为 Wi-Fi 名称列表")
     ignoredSSIDSet = {}
     for _, ssid in ipairs(cfg.ignoredSSIDs) do
@@ -628,19 +701,16 @@ function M.start(options)
         ignoredSSIDSet[ssid] = true
     end
     if type(cfg.to) == "string" then cfg.to = { cfg.to } end
-    if #cfg.to == 0 and cfg.from ~= "" then cfg.to = { cfg.from } end
     for _, name in ipairs({ "lockedInterval", "afterUnlockInterval", "afterUnlockCount", "cameraTimeout", "mailTimeout", "retryInitial", "retryMax" }) do
         assert(type(cfg[name]) == "number" and cfg[name] > 0, name .. " 必须 > 0")
     end
     assert(cfg.afterUnlockCount % 1 == 0, "afterUnlockCount 必须为整数")
     assert(cfg.maxMailBytes >= 128 * 1024, "maxMailBytes 至少为 128 KiB")
     assert(cfg.warmup >= 0 and cfg.maxLockedSeconds >= 0)
-    assert(not cfg.from:find("[\r\n]"), "无效发件地址")
-    assert(type(cfg.fromName) == "string" and not cfg.fromName:find("[\r\n]"), "无效发件人显示名")
     for _, address in ipairs(cfg.to) do assert(not address:find("[\r\n]"), "无效收件地址") end
-    mkdir(cfg.stateRoot .. "/reports")
+    mkdir(STATE_ROOT .. "/reports")
     -- 文件锁随进程退出释放，阻止同一队列的多个模块实例并行拍照/发信。
-    stateLock = assert(io.open(cfg.stateRoot .. "/instance.lock", "a"))
+    stateLock = assert(io.open(STATE_ROOT .. "/instance.lock", "a"))
     if not hs.fs.lock(stateLock, "w") then stateLock:close(); stateLock = nil; error("lockscreen_camera 已有实例运行") end
     reports = {}
     recover()
@@ -678,7 +748,7 @@ function M.stop(reason)
     if wifiWatcher then wifiWatcher:stop(); wifiWatcher = nil end
     stopTimer(mailTimer); stopTimer(mailTimeout); mailTimer, mailTimeout = nil, nil
     local task = mailTask; mailTask = nil; killTask(task)
-    os.remove(cfg.stateRoot .. "/outgoing.eml")
+    os.remove(STATE_ROOT .. "/outgoing.eml")
     local ok, err = pcall(function()
         finish(reason or "模块停止")
         cleanupSentPhotos()

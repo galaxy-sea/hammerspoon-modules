@@ -7,6 +7,16 @@ require("modules.dev_tools").start({
 -- 鼠标左键拖动浮窗可自由移动。显示当前前台应用及实际输入法；不抢焦点，切换桌面和全屏时保持显示。
 ]]
 local M = {}
+local defaults = { width = 500, margin = 4 }
+M.parameters = {
+    {
+        label = "浮窗布局",
+        fields = {
+            { key = "width", label = "浮窗宽度（像素）", default = defaults.width },
+            { key = "margin", label = "距屏幕右侧距离（像素）", default = defaults.margin },
+        },
+    },
+}
 local panel, appWatcher, screenWatcher, refreshTimer, dragTap
 local draggedPosition, dragOrigin, dragFrame, pressedAction, moved
 local appBundleID, inputSourceID
@@ -108,7 +118,7 @@ end
 function M.start(options)
     M.stop()
     options = options or {}
-    width, margin = options.width or 500, options.margin or 4
+    width, margin = options.width or defaults.width, options.margin or defaults.margin
     assert(type(width) == "number" and width >= 240, "width 必须大于等于 240")
     assert(type(margin) == "number" and margin >= 0, "margin 必须大于等于 0")
     panel = hs.canvas.new({ x = 0, y = 0, w = width, h = height })

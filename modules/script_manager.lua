@@ -5,7 +5,7 @@ require("modules.script_manager").start({ modules = scripts }) -- 可选 GUI
 -- 管理器的 start/stop 只创建或销毁界面，不启停其他脚本。
 ]]
 local M = {}
-local menu, view, bridge, registry, defaultScripts
+local menu, contextMenu, view, bridge, registry, defaultScripts
 local entries, order, overrides = {}, {}, {}
 local settingsKey = "script_manager.settings.v1"
 local htmlPath = debug.getinfo(1, "S").source:sub(2):match("^(.*[/\\])") .. "script_manager.html"
@@ -15,7 +15,39 @@ local function copy(value)
     for key, item in pairs(value) do result[key] = copy(item) end
     return result
 end
--- 检查实际来源，不把 require 的缓存当作文件仍存在；不扫描或轮询目录。
+local settingsPath = hs.configdir .. "/script_settings.json"
+local function writeSettings(value)
+    local data = assert(hs.json.encode(value, true), "配置编码失败")
+    local temporary = settingsPath .. ".tmp"
+    local file = assert(io.open(temporary, "w"))
+    local written, writeError = file:write(data)
+    local closed, closeError = file:close()
+    if not written or not closed then
+        os.remove(temporary)
+        error(writeError or closeError or "配置写入失败")
+    end
+    local renamed, renameError = os.rename(temporary, settingsPath)
+    if not renamed then os.remove(temporary); error(renameError or "配置保存失败") end
+end
+local function readSettings()
+    local file, openError, code = io.open(settingsPath, "r")
+    if file then
+        local data = file:read("*a"); file:close()
+        local value = hs.json.decode(data)
+        assert(type(value) == "table", "script_settings.json 格式错误")
+        return value
+    end
+    assert(code == 2, openError or "无法读取脚本配置")
+    -- 首次使用新位置时迁移旧设置；写入成功后才移除旧偏好设置。
+    local legacy = hs.settings.get(settingsKey)
+    if type(legacy) == "table" then
+        writeSettings(legacy)
+        hs.settings.clear(settingsKey)
+        return legacy
+    end
+    return {}
+end
+-- 检查实际来源，不把 require 的缓存当作文件仍存在；不使用轮询。
 local function moduleExists(id)
     local name = "modules." .. id
     return package.preload[name] ~= nil or package.searchpath(name, package.path) ~= nil
@@ -24,7 +56,7 @@ end
 function M.load(definitions)
     -- 各脚本独立启动；某个脚本启动失败不会阻止其他脚本。
     local scripts, registered = {}, {}
-    local saved = hs.settings.get(settingsKey)
+    local saved = readSettings()
     saved = type(saved) == "table" and saved or {}
     -- 手动注册：register("脚本文件名", { 配置 })；每个脚本直接调用自己的 start。
     local function register(definition, options)
@@ -59,6 +91,7 @@ function M.load(definitions)
     end
 
     -- 默认配置缺失或无法读取时，仍允许通过已保存设置恢复脚本、打开 GUI。
+    local discover = definitions == nil
     local recovering = false
     if definitions == nil then
         local exists = package.preload.config ~= nil or package.searchpath("config", package.path) ~= nil
@@ -91,6 +124,20 @@ function M.load(definitions)
             enabled = setting.enabled, options = setting.options, defaults = setting.defaults, registered = true })
     end
 
+    -- 只在默认加载时扫描一次；新发现的脚本默认关闭，不执行其 start。
+    if discover and hs.fs then
+        local directory = htmlPath:match("^(.*[/\\])")
+        local found = {}
+        for file in hs.fs.dir(directory) do
+            local id = file:match("^([%w_]+)%.lua$")
+            if id and id ~= "script_manager" and not registered[id] then found[#found + 1] = id end
+        end
+        table.sort(found)
+        for _, id in ipairs(found) do
+            register({ id = id, enabled = false, options = {} })
+        end
+    end
+
     -- 如需在 init.lua 手动注册，可在加载 GUI 前调用 scripts.register(...)。
     scripts.register = register
     return scripts
@@ -108,6 +155,31 @@ local function validate(value, depth)
         end
     end
 end
+-- 仅 GUI 读取参数描述，不调用脚本的 start；未声明参数的脚本保持原有编辑方式。
+local parameterCache = {}
+local function parametersFor(entry)
+    if parameterCache[entry.id] == nil then
+        local module = entry.module or package.loaded["modules." .. entry.id]
+        if not module then
+            local ok, loaded = pcall(require, "modules." .. entry.id)
+            if ok then module = loaded end
+        end
+        parameterCache[entry.id] = type(module) == "table" and type(module.parameters) == "table" and module.parameters or false
+    end
+    return parameterCache[entry.id] and copy(parameterCache[entry.id]) or nil
+end
+local function applicationField(parameters, key)
+    for _, parameter in ipairs(parameters or {}) do
+        if parameter.key == key and parameter.options == "application" then return true end
+        if parameter.fields and applicationField(parameter.fields, key) then return true end
+    end
+    return false
+end
+local function installationFor(entry)
+    parametersFor(entry)
+    local module = entry.module or package.loaded["modules." .. entry.id]
+    return type(module) == "table" and type(module.installation) == "table" and copy(module.installation) or nil
+end
 local function snapshot()
     local result = {}
     for _, id in ipairs(order) do
@@ -117,6 +189,7 @@ local function snapshot()
                 id = id, title = entry.title, description = entry.description,
                 enabled = entry.enabled, running = entry.running, error = entry.error,
                 options = copy(entry.options), defaults = copy(entry.defaults), registered = entry.registered,
+                parameters = parametersFor(entry), installation = installationFor(entry),
             }
         end
     end
@@ -152,7 +225,7 @@ function M.apply(id, enabled, options)
         local saved = copy(overrides)
         saved[id] = copy(saved[id] or {})
         saved[id].enabled, saved[id].options = enabled, copy(options)
-        ok, err = pcall(hs.settings.set, settingsKey, saved)
+        ok, err = pcall(writeSettings, saved)
         if ok then
             overrides = saved
             entry.enabled, entry.options, entry.error = enabled, copy(options), nil
@@ -201,7 +274,7 @@ function M.register(definition)
             registered = true, title = entry.title, description = entry.description,
             enabled = entry.enabled, options = copy(entry.options), defaults = copy(entry.defaults),
         }
-        hs.settings.set(settingsKey, saved)
+        writeSettings(saved)
         overrides = saved
     end)
     if not ok then
@@ -217,6 +290,37 @@ end
 function M.status()
     return snapshot()
 end
+-- 使用系统文件选择窗口挑选 .app，只读取 Bundle 信息，不启动所选软件。
+function M.chooseApplication()
+    local ok, files = pcall(hs.dialog.chooseFileOrFolder,
+        "选择应用", "/Applications", true, false, false, { "app" }, true)
+    if not ok then return nil, tostring(files) end
+    local path = files and (files[1] or files["1"])
+    if not path then return nil end
+    local read, info = pcall(hs.application.infoForBundlePath, path)
+    if not read or type(info) ~= "table" or type(info.CFBundleIdentifier) ~= "string" or info.CFBundleIdentifier == "" then
+        return nil, "无法读取所选应用的 Bundle ID，请重新选择 .app 文件。"
+    end
+    return { id = info.CFBundleIdentifier, name = info.CFBundleDisplayName or info.CFBundleName or path:match("([^/]+)%.app$") or info.CFBundleIdentifier }
+end
+-- 只读取系统已启用的输入源；不注册输入法回调、不切换输入法。
+function M.inputSources()
+    local result, seen = {}, {}
+    for _, getter in ipairs({ hs.keycodes.layouts, hs.keycodes.methods }) do
+        local ok, ids = pcall(getter, true)
+        local named, names = pcall(getter, false)
+        if ok and type(ids) == "table" then
+            for index, id in ipairs(ids) do
+                if type(id) == "string" and not seen[id] then
+                    seen[id] = true
+                    local name = named and type(names) == "table" and names[index]
+                    result[#result + 1] = { value = id, label = type(name) == "string" and name or id }
+                end
+            end
+        end
+    end
+    return result
+end
 local function publish(message, success, savedID)
     if not view then return end
     local payload = hs.json.encode({ modules = M.status(), message = message or "", success = success ~= false, savedID = savedID })
@@ -231,9 +335,17 @@ function M.show()
         local body = message.body
         if type(body) ~= "table" then return end
         if body.action == "ready" then publish()
-        elseif body.action == "register" then
-            local ok, err = M.register(body)
-            publish(ok and "已注册脚本" or ("注册失败：" .. tostring(err)), ok, ok and body.id or nil)
+        elseif body.action == "options" and body.source == "inputSources" then
+            local result = { source = body.source, options = M.inputSources() }
+            if view then view:evaluateJavaScript("window.receiveOptions(" .. hs.json.encode(result) .. ")") end
+        elseif body.action == "chooseApplication" then
+            if entries[body.id] and (type(body.request) == "string" or (type(body.key) == "string" and applicationField(parametersFor(entries[body.id]), body.key))) then
+                local app, err = M.chooseApplication()
+                if view then
+                    local result = { id = body.id, key = body.key, request = body.request, application = app, error = err }
+                    view:evaluateJavaScript("window.receiveApplication(" .. hs.json.encode(result) .. ")")
+                end
+            end
         elseif body.action == "save" then
             local ok, err = M.apply(body.id, body.enabled, body.options)
             publish(ok and "已保存并应用" or ("未保存：" .. tostring(err)), ok, ok and body.id or nil)
@@ -255,6 +367,7 @@ end
 function M.stop()
     if view then view:delete(); view, bridge = nil, nil end
     if menu then menu:delete(); menu = nil end
+    if contextMenu then contextMenu:delete(); contextMenu = nil end
     entries, order, registry = {}, {}, nil
     return M
 end
@@ -268,7 +381,7 @@ function M.start(options)
     end
     assert(type(modules) == "table", "需要传入独立脚本列表 modules")
     M.stop()
-    local saved = hs.settings.get(settingsKey)
+    local saved = readSettings()
     overrides = type(saved) == "table" and saved or {}
     registry = modules
     for index, item in ipairs(registry) do
@@ -283,7 +396,9 @@ function M.start(options)
         order[#order + 1] = item.id
     end
     menu = hs.menubar.new():setTitle("脚本")
-    menu:setMenu(function()
+    -- 可见图标始终只处理点击，避免 macOS 缓存已挂载的下拉菜单。
+    contextMenu = hs.menubar.new(false)
+    contextMenu:setMenu(function()
         local items = { { title = "打开设置…", fn = M.show }, { title = "-" } }
         for _, entry in ipairs(M.status()) do
             local id = entry.id
@@ -294,6 +409,13 @@ function M.start(options)
             end }
         end
         return items
+    end)
+    menu:setClickCallback(function()
+        if hs.eventtap.checkMouseButtons().right then
+            contextMenu:popupMenu(hs.mouse.absolutePosition())
+        else
+            M.show()
+        end
     end)
     return M
 end

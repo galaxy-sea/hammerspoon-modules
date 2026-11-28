@@ -1,6 +1,8 @@
 local M = {}
 
 local watcher = nil
+local generation = 0
+M.parameters = {} -- 无需配置；GUI 仅提供脚本总开关。
 
 -- 判断应用是否还有“真正的窗口”
 local function hasRealWindows(app)
@@ -28,32 +30,12 @@ local function hasRealWindows(app)
     return #windows > 0
 end
 
--- hotkey 对象由 init.lua 传入，须与目标应用实际的关闭窗口快捷键一致。
-function M.start(options)
-    local shortcut = options and options.hotkey
-    -- 防止重复启动
-    if watcher then
-        return
-    end
-
-    assert(shortcut, "close_last_window_hide.start 需要传入 hotkey 配置")
-    if shortcut.bind == false then
-        return
-    end
-
-    local keyCode = assert(
-        hs.keycodes.map[shortcut.key:lower()],
-        "未知的关闭窗口按键：" .. shortcut.key
-    )
-    local modifiers = {}
-    for _, modifier in ipairs(shortcut.mods) do
-        assert(
-            modifier == "cmd" or modifier == "ctrl"
-                or modifier == "alt" or modifier == "shift",
-            "不支持的修饰键：" .. modifier
-        )
-        modifiers[modifier] = true
-    end
+-- 只监听 Cmd + W，不绑定或拦截快捷键；旧配置传入的参数会被忽略。
+function M.start()
+    if watcher then return M end
+    generation = generation + 1
+    local currentGeneration = generation
+    local keyCode = hs.keycodes.map.w
 
     watcher = hs.eventtap.new(
         {
@@ -62,12 +44,7 @@ function M.start(options)
         function(event)
             local flags = event:getFlags()
 
-            -- 严格匹配配置的修饰键，额外按下其他修饰键时不触发。
-            for _, modifier in ipairs({ "cmd", "ctrl", "alt", "shift" }) do
-                if (flags[modifier] or false) ~= (modifiers[modifier] or false) then
-                    return false
-                end
-            end
+            if not flags.cmd or flags.ctrl or flags.alt or flags.shift then return false end
 
             if event:getKeyCode() == keyCode then
                 -- 记录按下快捷键时的前台应用
@@ -79,6 +56,7 @@ function M.start(options)
 
                     -- 给应用一点时间处理原始关闭窗口快捷键
                     hs.timer.doAfter(0.15, function()
+                        if generation ~= currentGeneration or not watcher then return end
                         -- 通过 PID 重新取得刚才的应用
                         local targetApp =
                             hs.application.applicationForPID(pid)
@@ -104,13 +82,16 @@ function M.start(options)
     )
 
     watcher:start()
+    return M
 end
 
 function M.stop()
+    generation = generation + 1
     if watcher then
         watcher:stop()
         watcher = nil
     end
+    return M
 end
 
 return M

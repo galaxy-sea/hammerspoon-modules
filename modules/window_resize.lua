@@ -15,6 +15,15 @@
 
 local M = {}
 
+-- GUI 只读取参数描述；脚本独立运行时也使用这里的默认值。
+M.parameters = {
+    {
+        key = "hotkey", control = "hotkey",
+        label = "调整窗口快捷键",
+        default = { mods = { "ctrl", "cmd", "shift" }, key = "5" },
+    },
+}
+
 ------------------------------------------------------------
 -- px -> points
 ------------------------------------------------------------
@@ -247,7 +256,7 @@ end
 
 function M.start(options)
     M.stop()
-    local hotkey = options and options.hotkey
+    local hotkey = (options and options.hotkey) or M.parameters[1].default
 
     --------------------------------------------------------
     -- Chooser
@@ -340,13 +349,11 @@ function M.start(options)
     -- 快捷键
     --------------------------------------------------------
 
-    if hotkey and hotkey.bind ~= false then
-        resizeHotkey = hs.hotkey.bind(
-            hotkey.mods,
-            hotkey.key,
-            showResizeChooser
-        )
-    end
+    resizeHotkey = hs.hotkey.bind(
+        hotkey.mods,
+        hotkey.key,
+        showResizeChooser
+    )
 
     return M
 end

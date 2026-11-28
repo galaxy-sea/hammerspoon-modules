@@ -1,4 +1,4 @@
--- 默认配置；本机保存的设置优先于此文件，不加载 GUI 也会生效。
+-- 默认配置；同目录 script_settings.json 中保存的设置优先，不加载 GUI 也会生效。
 -- 仍可直接编辑这里，再在面板中恢复默认并保存。
 return {
     {
@@ -20,8 +20,7 @@ return {
         enabled = true,
         options = {
             account = "qq",
-            from = "2468080401@qq.com",
-            fromName = "MacBook Pro 21 M1 Pro",
+            deviceName = "MacBook Pro 21 M1 Pro",
             to = { "469753862@qq.com" },
             ignoredSSIDs = { "galaxy", "galaxy-5G" }, -- 连接到这些 Wi-Fi 时不拍摄、不发信
             lockedInterval = 5,        -- 锁屏唤醒后拍摄间隔（秒）
@@ -34,12 +33,7 @@ return {
         title = "自动隐藏应用",
         description = "关闭最后一个窗口后隐藏应用。",
         enabled = true,
-        options = {
-            hotkey = {
-                mods = { "cmd" },
-                key = "W",
-            },
-        },
+        options = {},
     },
     {
         id = "blink_reminder",

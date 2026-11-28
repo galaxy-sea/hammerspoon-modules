@@ -1,7 +1,30 @@
--- Cron 使用 Mac 本地时间：分 时 日 月 星期（0 或 7 为周日）。
+-- 使用 Linux Cron 格式，按 Mac 本地时间执行：分 时 日 月 星期（0 或 7 为周日）。
 -- url 和 cron 均可为字符串或数组；任一 Cron 匹配时打开全部链接，使用系统默认浏览器。
 -- Cron 支持 *、列表、范围、步长，以及 JAN-DEC / SUN-SAT。
 local M = {}
+M.installation = {
+    command = [[# 执行时间使用 Linux Cron 格式，按 Mac 本地时间执行。
+# 分 时 日 月 星期（0 或 7 为周日）
+
+0 9 * * *       # 每天 09:00
+0 9 * * 1-5     # 周一至周五 09:00
+0 14 * * 1     # 每周一 14:00
+*/30 * * * *   # 每隔 30 分钟
+
+# 同一计划可填写多个网址和多个执行时间。]],
+}
+M.parameters = {
+    {
+        key = "schedules",
+        label = "网页计划", itemLabel = "计划", layout = "columns",
+        default = {},
+        fields = {
+            { key = "enabled", label = "启用计划", default = true, header = true },
+            { key = "url", label = "打开的网址", default = { "https://example.com" } },
+            { key = "cron", label = "执行时间（Linux Cron：分 时 日 月 星期）", default = { "0 9 * * 1-5" } },
+        },
+    },
+}
 local running, jobs, timer, watcher = false, {}, nil, nil
 local previousShutdown, shutdownHook
 local generation = 0

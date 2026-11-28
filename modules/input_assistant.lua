@@ -24,6 +24,40 @@ require("modules.input_assistant").start({
 -- hs.keycodes.currentSourceID() 查看当前输入法 ID；需要辅助功能权限。
 ]]
 local M = {}
+local DEFAULT_SOURCE = "org.fcitx.inputmethod.Fcitx5.zhHans"
+M.installation = {
+    title = "输入法规则说明",
+    command = [[# 默认输入法用于未配置的应用。
+# 应用名单填写 Bundle ID；支持 com.jetbrains.* 这样的前缀匹配。
+# 英文标点只对名单中的软件生效，不改变当前输入法；- 和 = 保留候选翻页。
+# 应用输入法、输入区域均按输入法 ID 分组，同一个应用或区域只放入一个分组。
+# 未单独配置时，Chrome 地址栏和 VS Code 控制台面板使用 ABC；聊天输入框使用默认输入法。
+# 所选输入法必须先在系统设置中启用；GUI 只读取列表，不切换输入法。]],
+}
+M.parameters = {
+    {
+        label = "基础设置",
+        fields = { { key = "defaultSource", label = "默认输入法", default = DEFAULT_SOURCE, options = "inputSources" } },
+    },
+    {
+        label = "英文标点",
+        fields = { { key = "englishPunctuation", label = "使用英文标点的应用", default = {}, item = { options = "application" } } },
+    },
+    {
+        key = "appInputSources", label = "应用输入法分组", control = "map", default = {}, itemLabel = "输入法分组",
+        keyField = { label = "输入法", default = "", options = "inputSources" },
+        valueField = { label = "应用 Bundle ID", default = {}, item = { options = "application" } },
+    },
+    {
+        key = "focusInputSources", label = "输入区域分组", control = "map", default = {}, itemLabel = "输入法分组",
+        keyField = { label = "输入法", default = "", options = "inputSources" },
+        valueField = { label = "输入区域", default = {}, options = {
+            { value = "chromeAddress", label = "Chrome 地址栏" },
+            { value = "vscodeConsolePanel", label = "VS Code 控制台面板" },
+            { value = "vscodeChat", label = "VS Code ChatGPT / Codex 聊天输入框" },
+        } },
+    },
+}
 local watcher, observer, retryTimer, refreshTimer, config, lastContext
 local generation = 0
 local log = hs.logger.new("input_assistant", "warning")
@@ -372,12 +406,12 @@ function M.start(options)
     })
     local appSources = expandSources(options.appInputSources, "appInputSources")
     config = {
-        defaultSource = options.defaultSource or "org.fcitx.inputmethod.Fcitx5.zhHans",
+        defaultSource = options.defaultSource or DEFAULT_SOURCE,
         appInputSources = appSources,
         focusInputSources = {
             chromeAddress = focusSources.chromeAddress or "com.apple.keylayout.ABC",
             vscodeConsolePanel = focusSources.vscodeConsolePanel or "com.apple.keylayout.ABC",
-            vscodeChat = focusSources.vscodeChat or options.defaultSource or "org.fcitx.inputmethod.Fcitx5.zhHans",
+            vscodeChat = focusSources.vscodeChat or options.defaultSource or DEFAULT_SOURCE,
         },
     }
     assert(type(config.defaultSource) == "string", "defaultSource 必须为 Source ID")

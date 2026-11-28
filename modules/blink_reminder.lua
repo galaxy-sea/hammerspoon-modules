@@ -11,6 +11,30 @@ require("modules.blink_reminder").start({
 ]]
 
 local M = {}
+local defaults = {
+    intervalMinutes = 20,
+    snoozeMinutes = { 1, 5, 10 },
+    hoverSeconds = 10,
+    hoverCount = 3,
+    hotkey = { mods = { "ctrl", "alt", "cmd" }, key = "B", bind = false },
+}
+M.parameters = {
+    {
+        label = "提醒时间",
+        fields = {
+            { key = "intervalMinutes", label = "提醒间隔（分钟）", default = defaults.intervalMinutes },
+            { key = "snoozeMinutes", label = "延后时间（分钟）", default = defaults.snoozeMinutes },
+        },
+    },
+    {
+        label = "休息确认",
+        fields = {
+            { key = "hoverSeconds", label = "每次悬停时间（秒）", default = defaults.hoverSeconds },
+            { key = "hoverCount", label = "悬停确认次数", default = defaults.hoverCount },
+        },
+    },
+    { key = "hotkey", label = "测试快捷键", control = "hotkey", enableLabel = "启用测试", default = defaults.hotkey },
+}
 
 local PANEL_WIDTH, PANEL_HEIGHT = 500, 338
 local BUTTON_WIDTH, BUTTON_HEIGHT = 112, 42  -- 更小的悬浮按钮；主体约 108 × 38 px
@@ -28,10 +52,10 @@ end
 
 local app = {
     running = false,
-    intervalMinutes = 20,
-    snoozeMinutes = { 1, 5, 10 },
-    hoverSeconds = 10,
-    hoverCount = 3,
+    intervalMinutes = defaults.intervalMinutes,
+    snoozeMinutes = defaults.snoozeMinutes,
+    hoverSeconds = defaults.hoverSeconds,
+    hoverCount = defaults.hoverCount,
     reminderTimer = nil,
     hoverTimer = nil,               -- 系统级鼠标位置轮询，不依赖 WebView 的 mouseenter
     stage = 0,                     -- 已完成的悬停确认次数；0 为初始提醒
@@ -490,12 +514,12 @@ function M.start(options)
             name .. " 必须为正数")
         return value
     end
-    local interval = positive(options.intervalMinutes, 20, "intervalMinutes")
-    local seconds = positive(options.hoverSeconds, 10, "hoverSeconds")
-    local count = positive(options.hoverCount, 3, "hoverCount")
+    local interval = positive(options.intervalMinutes, defaults.intervalMinutes, "intervalMinutes")
+    local seconds = positive(options.hoverSeconds, defaults.hoverSeconds, "hoverSeconds")
+    local count = positive(options.hoverCount, defaults.hoverCount, "hoverCount")
     assert(count % 1 == 0, "hoverCount 必须为正整数")
     local snoozes, seen = {}, {}
-    local configuredSnoozes = options.snoozeMinutes or { 1, 5, 10 }
+    local configuredSnoozes = options.snoozeMinutes or defaults.snoozeMinutes
     assert(type(configuredSnoozes) == "table", "snoozeMinutes 必须为数组")
     for _, value in ipairs(configuredSnoozes) do
         positive(value, nil, "snoozeMinutes 中的时间")

@@ -53,6 +53,71 @@ require("modules.browser_dispatcher").start({
 })
 ]]
 local M = {}
+local defaults = {
+    browsers = { "chrome", "edge", "safari", "firefox" },
+    profiles = { "Default", "Profile 1" },
+    logLevel = "info",
+}
+local browserOptions = {
+    { value = "chrome", label = "Chrome" }, { value = "edge", label = "Edge" },
+    { value = "safari", label = "Safari" }, { value = "firefox", label = "Firefox" },
+}
+M.installation = {
+    title = "分流规则说明",
+    command = [[# 规则从上往下匹配，首条命中后执行；未命中时使用全局列表第一项。
+# 普通网址直接填写，例如：www.jlc.com/newOrder
+# 来源应用按名称精确匹配，例如：微信、Slack；与网址同时填写时需要同时匹配。
+# browser / profile：省略使用默认项，字符串固定选择，choose 每次选择，数组使用自定义选择列表。
+# 浏览器列表和用户配置列表的第一项为默认项；Safari 忽略用户配置。
+# Chrome / Edge 使用 Profile 目录名；Firefox 使用 Profile 名称。
+# 高级匹配使用 Lua 模式，例如：^https?://example%.com/items/%d+$]],
+}
+M.parameters = {
+    {
+        label = "浏览器与用户配置", collapsed = true, layout = "columns",
+        fields = {
+            { key = "browsers", label = "浏览器列表（第一项为默认）", default = defaults.browsers, options = browserOptions },
+            { key = "profiles", label = "用户配置列表（第一项为默认）", default = defaults.profiles },
+        },
+    },
+    {
+        key = "rules", label = "分流规则", itemLabel = "规则", layout = "columns", default = {},
+        template = { urls = { "example.com" } },
+        fields = {
+            {
+                label = "匹配条件",
+                fields = {
+                    { key = "urls", label = "匹配网址", default = {}, omitEmpty = true },
+                    { key = "apps", label = "来源软件名称", default = {}, omitEmpty = true },
+                    {
+                        label = "高级匹配", collapsed = true,
+                        fields = { { key = "patterns", label = "Lua 匹配模式", default = {}, omitEmpty = true } },
+                    },
+                },
+            },
+            {
+                label = "打开方式",
+                fields = {
+                    { key = "browser", label = "浏览器", default = "", options = browserOptions,
+                        selection = { source = "browsers", choose = "choose" } },
+                    { key = "profile", label = "用户配置", default = "",
+                        selection = { source = "profiles", choose = "choose" },
+                        disabledWhen = { key = "browser", source = "browsers", values = { "safari", "com.apple.Safari" }, message = "Safari 不使用用户配置。" } },
+                },
+            },
+        },
+    },
+    {
+        label = "高级设置", collapsed = true,
+        fields = {
+            { key = "logLevel", label = "日志级别", default = defaults.logLevel, options = {
+                { value = "nothing", label = "关闭" }, { value = "error", label = "错误" },
+                { value = "warning", label = "警告" }, { value = "info", label = "常规" },
+                { value = "debug", label = "调试" }, { value = "verbose", label = "详细" },
+            } },
+        },
+    },
+}
 local dispatcher, profileChooser, browserChooser
 local previousCallback, dispatchCallback
 local activeTasks = {}
@@ -195,8 +260,8 @@ end
 
 function M.start(config)
     config = config or {}
-    local profiles = config.profiles or { "Default", "Profile 1" }
-    local browsers = config.browsers or { "chrome", "edge", "safari", "firefox" }
+    local profiles = config.profiles or defaults.profiles
+    local browsers = config.browsers or defaults.browsers
     local browserIDs = {
         chrome = "com.google.Chrome", edge = "com.microsoft.edgemac",
         safari = "com.apple.Safari", firefox = "org.mozilla.firefox",
@@ -343,7 +408,7 @@ function M.start(config)
     dispatcher = spoon.URLDispatcher
     dispatcher.default_handler = defaultHandler
     dispatcher.url_patterns = patterns
-    dispatcher.logger.setLogLevel(config.logLevel or "info")
+    dispatcher.logger.setLogLevel(config.logLevel or defaults.logLevel)
     previousCallback = hs.urlevent.httpCallback
     dispatcher:start()
     dispatchCallback = hs.urlevent.httpCallback
