@@ -15,6 +15,10 @@ end
 hs = {
     menuIcon = function(visible) officialIcon = visible end,
     configdir = "/tmp/script-manager-test",
+    image = { imageFromPath = function(path)
+        assert(path:match("modules/%.%./icon%.svg$"))
+        return { setSize = function(self, size) assert(size.w == 18 and size.h == 18); return self end }
+    end },
     eventtap = { checkMouseButtons = function() return mouseButtons end },
     mouse = { absolutePosition = function() return { x = 10, y = 10 } end },
     logger = { new = function() return { w = function() end } end },
@@ -38,6 +42,7 @@ hs = {
         menuCreations = menuCreations + 1
         return {
             setTitle = function(self) return self end,
+            setIcon = function(self, icon, template) assert(icon and template); return self end,
             setMenu = function(_, fn) menuBuilder = fn end,
             setClickCallback = function(_, fn) menuClick = fn end,
             popupMenu = function() poppedItems = menuBuilder() end,

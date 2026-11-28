@@ -405,7 +405,14 @@ function M.start(options)
         registry[index] = entries[item.id]
         order[#order + 1] = item.id
     end
-    menu = hs.menubar.new():setTitle("脚本")
+    menu = hs.menubar.new()
+    local iconPath = htmlPath:match("^(.*[/\\])") .. "../icon.svg"
+    local icon = hs.image.imageFromPath(iconPath)
+    if icon then
+        menu:setIcon(icon:setSize({ w = 18, h = 18 }), true)
+    else
+        menu:setTitle("脚本")
+    end
     -- 可见图标始终只处理点击，避免 macOS 缓存已挂载的下拉菜单。
     contextMenu = hs.menubar.new(false)
     contextMenu:setMenu(function()
