@@ -14,7 +14,7 @@ class Element {
   reportValidity() { return all(this).every(e=>!e.validation); }
 }
 function all(element) { return [element,...element.children.flatMap(child=>typeof child==='object'?all(child):[])]; }
-for(const id of ['navigation','content','notice','reset','save','register']){const e=new Element('div');e.id=id;}
+for(const id of ['navigation','content','notice','reset','save','register','reload-config','open-console','script-enabled']){const e=new Element('div');e.id=id;}
 const messages=[];
 const context=vm.createContext({ document:{createElement:tag=>new Element(tag),getElementById:id=>ids.get(id)},window:{webkit:{messageHandlers:{scriptManager:{postMessage:body=>messages.push(JSON.parse(JSON.stringify(body)))}}}},console });
 const html=fs.readFileSync('modules/script_manager.html','utf8');
@@ -131,7 +131,8 @@ for(const parameters of [[],{}]){
  receive({modules:[{id:'close_last_window_hide',title:'自动隐藏应用',enabled:true,running:true,parameters,options:{hotkey:{mods:['cmd'],key:'W'}},defaults:{enabled:true,options:{}}}],savedID:'close_last_window_hide'});
  controls=all(ids.get('content'));
  assert(controls.some(e=>e.textContent==='此脚本无需配置，启用后自动运行。'));
- assert.equal(controls.filter(e=>e.tagName==='input').length,1);
+ assert.equal(controls.filter(e=>e.tagName==='input').length,0);
+ assert.equal(all(ids.get('script-enabled')).filter(e=>e.tagName==='input').length,1);
  assert(!controls.some(e=>e.className==='key-input'||e.textContent==='＋ 添加设置'));
 }
 // Application selection uses the native file picker; opening the form does not scan apps.
@@ -286,4 +287,5 @@ all(freshAppMap).find(e=>e.attributes?.['aria-label']==='删除应用输入法�
 ids.get('save').onclick();assert.deepEqual(messages.at(-1).options.appInputSources,{});
 receive({modules:[inputItem],savedID:'input_assistant'});
 assert(!html.includes('id="register"'), 'automatic discovery needs no registration button');
+for(const [id,action] of [['reload-config','reload'],['open-console','openConsole']]){ids.get(id).onclick();assert.deepEqual(messages.at(-1),{action});}
 console.log('PASS: UI edits, save payload, failed-save draft retention, defaults, metadata forms and source groups');

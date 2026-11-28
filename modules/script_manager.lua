@@ -1,6 +1,7 @@
 --[[
 local scripts = require("modules.script_manager").load() -- 仅启动脚本
 require("modules.script_manager").start({ modules = scripts }) -- 可选 GUI
+-- showHammerspoonMenuIcon = true 同时保留官方菜单栏入口；省略或 false 时由本 GUI 接替。
 -- scripts 由 init.lua 传入已经独立启动的脚本及其配置。
 -- 管理器的 start/stop 只创建或销毁界面，不启停其他脚本。
 ]]
@@ -335,6 +336,10 @@ function M.show()
         local body = message.body
         if type(body) ~= "table" then return end
         if body.action == "ready" then publish()
+        elseif body.action == "reload" then hs.reload()
+        elseif body.action == "openConsole" then
+            hs.consoleOnTop(false)
+            hs.openConsole()
         elseif body.action == "options" and body.source == "inputSources" then
             local result = { source = body.source, options = M.inputSources() }
             if view then view:evaluateJavaScript("window.receiveOptions(" .. hs.json.encode(result) .. ")") end
@@ -356,6 +361,7 @@ function M.show()
     view = hs.webview.new({ x = frame.x + (frame.w - w) / 2, y = frame.y + (frame.h - h) / 2, w = w, h = h },
         { javaScriptCanOpenWindowsAutomatically = false }, bridge)
         :windowStyle({ "titled", "closable", "resizable", "miniaturizable", "fullSizeContentView" })
+        :level(hs.drawing.windowLevels.normal)
         :transparent(false)
         :windowTitle("小脚本设置"):allowTextEntry(true):deleteOnClose(true)
     view:windowCallback(function(action)
@@ -365,6 +371,8 @@ function M.show()
     return M
 end
 function M.stop()
+    -- 先恢复官方入口，再移除管理器，避免两个入口同时消失。
+    hs.menuIcon(true)
     if view then view:delete(); view, bridge = nil, nil end
     if menu then menu:delete(); menu = nil end
     if contextMenu then contextMenu:delete(); contextMenu = nil end
@@ -372,6 +380,8 @@ function M.stop()
     return M
 end
 function M.start(options)
+    -- 先保留官方入口；GUI 启动成功后再接替。
+    hs.menuIcon(true)
     options = options or {}
     assert(type(options) == "table", "配置必须为对象")
     local modules = options.modules or registry or defaultScripts
@@ -417,6 +427,8 @@ function M.start(options)
             M.show()
         end
     end)
+    -- 菜单及点击处理就绪后，再应用官方入口的显示设置。
+    hs.menuIcon(options.showHammerspoonMenuIcon == true)
     return M
 end
 return M

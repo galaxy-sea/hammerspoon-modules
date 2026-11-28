@@ -5,6 +5,7 @@ local storedJSON, jsonValues, nextJSON = nil, {}, 0
 local menuCreations = 0
 local mouseButtons = {}
 local menuClick, poppedItems
+local officialIcon = true
 local running, starts, stops, loads = {}, {}, {}, {}
 local function duplicate(value)
     if type(value) ~= "table" then return value end
@@ -12,6 +13,7 @@ local function duplicate(value)
     return result
 end
 hs = {
+    menuIcon = function(visible) officialIcon = visible end,
     configdir = "/tmp/script-manager-test",
     eventtap = { checkMouseButtons = function() return mouseButtons end },
     mouse = { absolutePosition = function() return { x = 10, y = 10 } end },
@@ -92,7 +94,7 @@ local actualConfig = dofile("config.lua")
 local sourceFile = assert(io.open("init.lua", "r"))
 local initSource = sourceFile:read("*a"); sourceFile:close()
 -- Exercise the actual independent startup path with GUI import omitted.
-local headlessInit = initSource:gsub('require%("modules%.script_manager"%).start%({ modules = scripts }%)', '')
+local headlessInit = initSource:gsub('require%("modules%.script_manager"%).start%({ modules = scripts, showHammerspoonMenuIcon = false }%)', '')
 assert(headlessInit ~= initSource)
 local function launch(defs)
     package.loaded.config = duplicate(defs)
@@ -105,13 +107,20 @@ local function stopScripts()
     end
 end
 local registry = launch(definitions)
+assert(officialIcon, "headless startup must keep the official menu available")
 assert(menuCreations == 0 and #require("modules.script_manager").status() == 0, "load must not create GUI or attach its state")
 assert(running.test_one == "original" and loads.test_two == nil, "disabled module must not load")
 assert(definitions[1].options.value == "original", "module must receive a copy")
 local manager = require("modules.script_manager")
 local beforeStarts, beforeStops = starts.test_one, stops.test_one
 manager.start({ modules = registry })
+assert(not officialIcon, "ready GUI must replace the official menu icon")
+manager.start({ modules = registry, showHammerspoonMenuIcon = true })
+assert(officialIcon, "showHammerspoonMenuIcon=true must keep the official icon alongside the GUI")
+manager.start({ modules = registry, showHammerspoonMenuIcon = false })
+assert(not officialIcon, "showHammerspoonMenuIcon=false must hide the official icon once GUI is ready")
 manager.stop()
+assert(officialIcon, "stopping GUI must restore the official menu icon")
 assert(starts.test_one == beforeStarts and stops.test_one == beforeStops and running.test_one == "original",
     "GUI attach/detach must not change running scripts")
 manager.start({ modules = registry })

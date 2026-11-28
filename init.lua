@@ -1,7 +1,7 @@
 -- 启动脚本。
 local scripts = require("modules.script_manager").load()
 -- 可选 GUI：注释这一行，不影响脚本启动和运行。
-require("modules.script_manager").start({ modules = scripts })
+require("modules.script_manager").start({ modules = scripts, showHammerspoonMenuIcon = false }) -- true 保留官方菜单栏图标
 
 
 
